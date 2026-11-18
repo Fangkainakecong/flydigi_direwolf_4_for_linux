@@ -118,19 +118,44 @@ try:
     pad.claim(); claimed = True
     print("接口0已占用")
 
-    def pump(n=2):
-        for _ in range(n): pad.submit(URB_INT, 0x81, None, 64)
+    in_ids = set()
+
+    def pump(n=1):
+        for _ in range(n):
+            in_ids.add(pad.submit(URB_INT, 0x81, None, 64))
     pump(8)
 
+    def wait_out(tgt, timeout=0.5):
+        """等 OUT URB 完成；期间 IN 完成必须立刻补发，否则流水线会被抽干"""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            got = pad.reap()
+            if got is None:
+                time.sleep(0.002); continue
+            userctx, st, d = got
+            if userctx in in_ids:
+                in_ids.discard(userctx)
+                pump(1)
+                if d:
+                    saved.append((pending_phase[0], time.time() - t0, d))
+            if userctx == tgt:
+                return st
+        return None
+
+    pending_phase = ['out']
+
     def listen(seconds, phase):
+        pending_phase[0] = phase
         t0 = time.time()
         while time.time() - t0 < seconds:
             got = pad.reap()
             if got is None: time.sleep(0.001); continue
             userctx, st, d = got
-            if not d: continue
-            saved.append((phase, time.time() - t0, d))
-            pump()
+            if userctx in in_ids:
+                in_ids.discard(userctx)
+                pump(1)
+                if d:
+                    saved.append((phase, time.time() - t0, d))
 
     # ① 基线 2秒
     print("\n① 基线读流 2秒 (注入区[13..20]应为空)")
@@ -141,14 +166,7 @@ try:
     for k in range(2):
         tgt = pad.submit(URB_INT, 0x05, build_legacy(16), 15)
         time.sleep(0.05)
-        # 取回OUT
-        t0 = time.time()
-        while time.time() - t0 < 0.5:
-            got = pad.reap()
-            if got is None: time.sleep(0.002); continue
-            userctx, st, d = got
-            if userctx == tgt:
-                print(f"   cmd16 OUT#{k+1} status={st}"); break
+        print(f"   cmd16 OUT#{k+1} status={wait_out(tgt)}")
         listen(0.5, f"cmd16#{k+1}")
 
     # ③ 老方言 cmd80 sub4 配置版本 ×2
@@ -156,26 +174,14 @@ try:
     for k in range(2):
         tgt = pad.submit(URB_INT, 0x05, build_legacy(80, sub=4), 15)
         time.sleep(0.05)
-        t0 = time.time()
-        while time.time() - t0 < 0.5:
-            got = pad.reap()
-            if got is None: time.sleep(0.002); continue
-            userctx, st, d = got
-            if userctx == tgt:
-                print(f"   cmd80 OUT#{k+1} status={st}"); break
+        print(f"   cmd80 OUT#{k+1} status={wait_out(tgt)}")
         listen(0.5, f"cmd80sub4#{k+1}")
 
     # ④ 对照: 我们的 A5 5A A5 cmd1
     print("④ 对照: A5 5A A5 信封 cmd1, 监听1秒")
     tgt = pad.submit(URB_INT, 0x05, build_new(0x01), 32)
     time.sleep(0.05)
-    t0 = time.time()
-    while time.time() - t0 < 0.5:
-        got = pad.reap()
-        if got is None: time.sleep(0.002); continue
-        userctx, st, d = got
-        if userctx == tgt:
-            print(f"   cmd1 OUT status={st} 回包={d.hex(' ') if d else '(无)'}"); break
+    print(f"   cmd1 OUT status={wait_out(tgt)}")
     listen(0.5, "newenv_cmd1")
 
     # ⑤ 尾巴 1秒
@@ -188,10 +194,11 @@ finally:
     subprocess.run(['modprobe', 'xpad'], check=False)
     print("xpad 已重载, 手柄恢复")
 
-with open('/tmp/opencode/old_dialect.bin', 'wb') as f:
+os.makedirs('captures', exist_ok=True)
+with open('captures/old_dialect.bin', 'wb') as f:
     for phase, ts, d in saved:
         f.write(struct.pack('<dI', ts, len(d)) + phase.encode().ljust(16) + d)
-print(f"\n全量 {len(saved)} 包已存 /tmp/opencode/old_dialect.bin")
+print(f"\n全量 {len(saved)} 包已存 captures/old_dialect.bin")
 
 # ---- 即时汇总: 按 [15] 值分组注入区包 ----
 print("\n=== 注入区包统计 (按阶段 x [15]值) ===")
@@ -205,3 +212,20 @@ for phase, ts, d in saved:
 for k in sorted(per):
     print(f"  {k[0]:>12} [15]=0x{k[1]:02x}: {per[k]}包  样本[13..21]={samples[k]}")
 if not per: print("  (无注入区包)")
+
+# ---- 识别字段解读: 取注入了 [15]==0x10 的 cmd16 回包 ----
+print("\n=== cmd16 识别回包解读 ===")
+for phase, ts, d in saved:
+    if phase.startswith('cmd16#') and len(d) >= 28 and d[15] == 0x10:
+        print(f"  DeviceType={d[16]}  uid={d[17:21].hex()}  fw={d[21]}.{d[22]}"
+              f"  battery={d[23]}  connect={d[25]}  slot={d[27]}")
+        print(f"  原始[14..31] = {d[14:32].hex(' ')}")
+        break
+else:
+    print("  (没有 [15]==0x10 的回包；把上面的分组样本贴出来)")
+
+print("\n=== cmd80 sub4 配置版本回包 ===")
+for phase, ts, d in saved:
+    if phase.startswith('cmd80') and len(d) >= 28 and d[12] == 0xA5:
+        print(f"  [14..31] = {d[14:32].hex(' ')}")
+        break
