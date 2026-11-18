@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""冰原狼4 2.4G: 老方言读板载配置 blob（cmd33 / ack34）
+"""冰原狼4 2.4G: 读全部 4 个板载配置槽位并对比
 
-依据 docs/findings-other-devices.md（Vader 4 Pro 实测）：
+协议（Vader 4 Pro 实测，见 docs/findings-other-devices.md，本机已复现）：
   * 老方言帧 15 字节 = [A5, cmd, sub, ...payload]，写 EP 0x05，无校验
   * 回包注入在 32 字节输入报文 [14] 起，[15] = 命令号
-  * 读配置 = 命令 33（0x21），回包 ack = 34（0x22），
-    索引在 [16]，数据 10 字节在 [17..26]
-  * 790 / 840 字节两种大小（79 / 84 包）
+  * 读配置 = cmd33 (0x21)，sub = 槽位，次字节 = 包大小 10
+    回包 ack 34：索引 [16]，数据 10 字节 [17..26]
+  * 版本 = cmd80 (0x50) sub 4 → 4 个槽位的 data_version（uint16 LE）
+  * 识别 = cmd16 (0x10)：DeviceType [16]，uid [17..20]，固件 [21][22]，
+    电量 [23]，连接 [25]，当前槽位 [27]
 
-请求的 payload 形状文档没写死，这里依次试：
-    A: A5 21 00 0A        (sub=槽位, 下一字节=包大小 10)
-    B: A5 21 00           (只有槽位)
-    C: A5 21 01 0A        (槽位 1)
-    D: A5 21 00 00 0A     (槽位 + 2 字节包大小)
-谁能连续吐出 >= 70 个不同索引就用谁，然后拼成 blob 存盘。
+本脚本自动读 4 个槽位，解析键位表（偏移 13，32 槽 × 3 字节）并横向对比。
 
 用法
 ----
-    sudo python3 scripts/flydigi_legacy_blob_read.py
-    sudo python3 scripts/flydigi_legacy_blob_read.py --slot 1
+    sudo python3 scripts/flydigi_legacy_blob_read.py          # 4 个槽位全读
+    sudo python3 scripts/flydigi_legacy_blob_read.py --slot 2 # 只读一个
 """
 import argparse
 import collections
@@ -40,8 +37,17 @@ EAGAIN = 11
 URB_SIZE = 56
 INFLIGHT = 8
 PKG = 10
-SEQ_CMD = 33
-ACK_CMD = 34
+CMD_IDENTIFY, ACK_IDENTIFY = 16, 16
+CMD_READ, ACK_READ = 33, 34
+CMD_VERSION, ACK_VERSION = 80, 81
+
+KEY_NAMES = {
+    0: 'up', 1: 'right', 2: 'down', 3: 'left', 4: 'a', 5: 'b', 6: 'select',
+    7: 'x', 8: 'y', 9: 'start', 10: 'lb', 11: 'rb', 12: 'lt', 13: 'rt',
+    14: 'thl', 15: 'thr', 16: 'c', 17: 'z', 18: 'm1', 19: 'm2', 20: 'm3',
+    21: 'm4', 22: 'm5', 23: 'm6', 24: 'menu', 25: 'turbo', 27: 'home',
+    28: 'back',
+}
 
 _LIBC = ctypes.CDLL(None, use_errno=True)
 
@@ -196,43 +202,89 @@ class Link:
         return out
 
 
-def try_variant(link, name, frame, seconds=2.0):
-    print(f"\n--- {name}: {frame.hex(' ')} ---")
-    st = link.send(frame)
-    print(f"    OUT status={st}")
-    frames = link.collect(seconds)
-    acks = [d for d in frames if len(d) >= 32 and d[14] == 0xA5 and d[15] == ACK_CMD]
-    idx = collections.Counter(d[16] for d in acks)
-    print(f"    收到 {len(frames)} 帧，其中 cmd34 回包 {len(acks)} 个，"
-          f"不同索引 {len(idx)}")
-    if acks:
-        for d in acks[:3]:
-            print('    样本:', ' '.join('%02x' % b for b in d[14:27]))
-        if len(idx) > 1:
-            print(f"    索引范围 {min(idx)}..{max(idx)}"
-                  f"  重复索引 {[k for k, v in idx.items() if v > 1][:5]}")
-    return acks
+def van(frames, cmd):
+    """取出注入区以 [14]=A5、[15]=cmd 开头的回包"""
+    return [d for d in frames if len(d) >= 32 and d[14] == 0xA5 and d[15] == cmd]
 
 
-def assemble(acks, pkg=PKG):
+def identify(link):
+    link.send(legacy(CMD_IDENTIFY))
+    frames = link.collect(0.6)
+    gotten = van(frames, ACK_IDENTIFY)
+    if not gotten:
+        return None
+    d = gotten[0]
+    return {
+        'device_type': d[16],
+        'uid': d[17:21].hex(),
+        'fw': f'{d[21] >> 4}.{d[21] & 15}.{d[22] >> 4}.{d[22] & 15}',
+        'battery': d[23],
+        'connect': d[25],
+        'slot': d[27],
+        'raw': bytes(d[14:32]),
+    }
+
+
+def versions(link):
+    link.send(legacy(CMD_VERSION, 4))
+    frames = link.collect(0.6)
+    gotten = van(frames, ACK_VERSION)
+    if not gotten:
+        return None
+    d = gotten[0]
+    return [struct.unpack_from('<H', d, 17 + 2 * i)[0] for i in range(4)], bytes(d[14:32])
+
+
+def read_slot(link, slot):
+    link.send(legacy(CMD_READ, slot, bytes([PKG])))
+    frames = link.collect(1.5)
+    acks = van(frames, ACK_READ)
     chunks = {}
     for d in acks:
-        chunks.setdefault(d[16], bytes(d[17:17 + pkg]))
-    if not chunks:
-        return b'', 0, []
+        chunks.setdefault(d[16], bytes(d[17:17 + PKG]))
+    if len(chunks) < 70:
+        return None, len(chunks)
     total = max(chunks) + 1
-
-    blob = bytearray(total * pkg)
+    blob = bytearray(total * PKG)
     for i, c in chunks.items():
-        blob[i * pkg:(i + 1) * pkg] = c
-    missing = sorted(set(range(total)) - set(chunks))
-    return bytes(blob), total, missing
+        blob[i * PKG:(i + 1) * PKG] = c
+    return bytes(blob), len(chunks)
+
+
+def key_table(blob):
+    out = []
+    for k in range(32):
+        off = 13 + k * 3
+        target, mode, freq = blob[off], blob[off + 1], blob[off + 2]
+        out.append((KEY_NAMES.get(k, f'id{k}'), target, mode, freq))
+    return out
+
+
+def describe(blob):
+    """把键位表翻译成人类可读的改动列表"""
+    lines = []
+    for name, target, mode, freq in key_table(blob):
+        if target == 255 and freq == 0:
+            continue
+        tname = '自身' if target == 255 else KEY_NAMES.get(target, f'id{target}')
+        if target == 254:
+            tname = '键盘(死键)'
+        elif target == 32:
+            tname = '宏'
+        turbo = f'  turbo(模式{mode}, 频率{freq})' if freq else ''
+        lines.append(f'{name}→{tname}{turbo}')
+    return lines
+
+
+def title_of(blob):
+    raw = blob[770:790]
+    return raw.decode('utf-16-le', 'replace').rstrip('\uffff\x00')
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--slot', type=int, default=0)
-    ap.add_argument('--seconds', type=float, default=2.0)
+    ap.add_argument('--slot', type=int, default=None)
+    ap.add_argument('--save', action='store_true', default=True)
     args = ap.parse_args()
 
     dev = find_pad()
@@ -244,62 +296,65 @@ def main():
     subprocess.run(['modprobe', '-r', 'xpad'], check=False)
     time.sleep(0.3)
     claimed = False
-    best = None
+    saved = []
     try:
         pad.claim()
         claimed = True
         link = Link(pad)
         link.collect(0.3)
 
-        s = args.slot
-        variants = [
-            (f'槽位{s} + 包大小10', legacy(SEQ_CMD, s, bytes([PKG]))),
-            (f'槽位{s} 单独', legacy(SEQ_CMD, s)),
-            (f'槽位{s} + 大小 00 0A', legacy(SEQ_CMD, s, bytes([0, PKG]))),
-            (f'槽位{s} + 大小 0A 00', legacy(SEQ_CMD, s, bytes([PKG, 0]))),
-        ]
-        for name, frame in variants:
-            acks = try_variant(link, name, frame, args.seconds)
-            if len({d[16] for d in acks}) >= 70:
-                best = (name, acks)
-                break
+        info = identify(link)
+        if info:
+            print(f"\n识别: DeviceType={info['device_type']} uid={info['uid']} "
+                  f"固件={info['fw']} 电量={info['battery']} "
+                  f"连接={'有线' if info['connect'] == 1 else '2.4G'} "
+                  f"当前槽位={info['slot']}")
+        ver = versions(link)
+        if ver:
+            ids, raw = ver
+            print(f"配置版本: " + '  '.join(f'槽位{i}={v} (0x{v:04x})'
+                                            for i, v in enumerate(ids)))
+            print(f"  [14..31] = {raw.hex(' ')}")
 
-        if not best:
-            print("\n没有任何形状吐出 >= 70 个索引，把上面样本发我。")
-            return
+        slots = [args.slot] if args.slot is not None else [0, 1, 2, 3]
+        blobs = {}
+        for slot in slots:
+            t0 = time.time()
+            blob, got = read_slot(link, slot)
+            if blob is None:
+                print(f"\n槽位{slot}: 只收到 {got} 包，跳过")
+                continue
+            blobs[slot] = blob
+            print(f"\n槽位{slot}: {len(blob)} 字节, {got} 包, "
+                  f"data_version={struct.unpack_from('<H', blob, 225)[0]}, "
+                  f"标题={title_of(blob)!r}")
+            changes = describe(blob)
+            if changes:
+                print('  改动: ' + '   '.join(changes))
+            else:
+                print('  改动: 无（全默认键位）')
 
-        name, acks = best
-        print(f"\n=== 用 '{name}' 拼 blob ===")
-        blob, total, missing = assemble(acks)
-        print(f"  包数 {total}  字节 {len(blob)}  缺包 {missing[:10]}"
-              f"{' …' if len(missing) > 10 else ''}")
-        os.makedirs('captures', exist_ok=True)
-        stamp = time.strftime('%Y%m%d-%H%M%S')
-        base = f'captures/blob_slot{args.slot}_{stamp}'
-        open(base + '.bin', 'wb').write(blob)
-        print(f"  已存 {base}.bin")
+        if args.save and blobs:
+            os.makedirs('captures', exist_ok=True)
+            stamp = time.strftime('%Y%m%d-%H%M%S')
+            for slot, blob in blobs.items():
+                path = f'captures/blob_slot{slot}_{stamp}.bin'
+                open(path, 'wb').write(blob)
+                print(f"已存 {path}")
 
-        print("\n  前 96 字节:")
-        for off in range(0, min(96, len(blob)), 16):
-            row = blob[off:off + 16]
-            print(f'    {off:04x}  ' + ' '.join('%02x' % b for b in row))
-
-        print("\n  非零区段:")
-        runs = []
-        start = None
-        for i, b in enumerate(blob):
-            if b and start is None:
-                start = i
-            elif not b and start is not None:
-                runs.append((start, i))
-                start = None
-        if start is not None:
-            runs.append((start, len(blob)))
-        for a, b in runs[:30]:
-            chunk = blob[a:min(b, a + 16)]
-            print(f'    {a:04x}..{b - 1:04x} ({b - a:3d}B)  '
-                  + ' '.join('%02x' % x for x in chunk))
-        print(f"    共 {len(runs)} 段")
+        if len(blobs) > 1:
+            print("\n=== 槽位间差异（键位表 + 功能块）===")
+            base = min(blobs)
+            for slot in sorted(blobs):
+                if slot == base:
+                    continue
+                diff = [i for i in range(min(len(blobs[base]), len(blobs[slot])))
+                        if blobs[base][i] != blobs[slot][i]]
+                print(f"  槽位{slot} vs 槽位{base}: {len(diff)} 字节不同")
+                for i in diff[:40]:
+                    print(f'    {i:3d}: {blobs[base][i]:3d} → {blobs[slot][i]:3d}')
+                if len(diff) > 40:
+                    print(f'    … 还有 {len(diff) - 40} 处')
     finally:
         if claimed:
             try:
@@ -307,7 +362,7 @@ def main():
             except OSError:
                 pass
         subprocess.run(['modprobe', 'xpad'], check=False)
-        print("xpad 已重载")
+        print("\nxpad 已重载")
 
 
 if __name__ == '__main__':
