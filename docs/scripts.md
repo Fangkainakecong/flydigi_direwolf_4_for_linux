@@ -8,37 +8,41 @@
 
 ### `flydigi_button_probe.py` — 全输入探针（事件驱动，推荐）⭐
 
-**作用**: 弄清**所有按键和轴**在 USB 报文里的位置 —— 21 个按键
-（A/B/X/Y、LB/RB、LT/RT、L3/R3、Start/Back/Home、十字四向、M1/M2、FN、Turbo）
-+ 8 个轴动作（左右摇杆四方向满偏）。**不用掐秒表**：脚本自己从报文里检测
-按下/松开，检测到就自动进下一个。
+**作用**: 确认每个按键/轴的报文落点。布局已解出（见
+[docs/input-report.md](input-report.md)），脚本直接查位图，不再用基线猜。
 
-**流程**:
-1. 静止 2 秒做基线，每个字节记录 min/max 再留一份等于噪声幅度的余量：
-   数字位（基线 0）任何置位都算；摇杆（基线 ±几百抖动）只有满偏才越界，
-   抖动和零漂不会误触发。
-2. **阶段 A**：不开厂商流，先测一次 M1 —— 回答“默认状态能不能看到”。
-3. **阶段 B**：发 cmd17 开厂商流，重新校准，再逐项测 29 个输入。
-4. 每项：提示 → 检测到事件 → 打印签名（字节/取值或范围/时长/标准[2]是否变）。
-   **6 秒**内无反应自动跳过，结束时列出漏掉的项和重跑命令。
-5. 每个输入开测前有 0.3 秒“静止对齐”：摇杆自动校零导致的漂移会被吸收，
-   不会级联误判。
-6. 结束可选进入**自由记录模式**：按任意键打印一个签名，用于验证
-   “Windows 里把 M2 改成 L3 后 Linux 收到什么”。
-
-**产物**: `captures/inputs_<时间戳>.bin`（报文流）+
-`captures/inputs_<时间戳>.json`（基线 min/max/margin、每项签名）
+**交互**（专门为"人看不完长提示"改过）:
+- 每个按键只显示一行短提示，如 `[5/21] 按 A`；
+- **摇杆不再逐方向提问**：提示"慢慢转一圈"，脚本自动判定四个方向，
+  转到哪个打哪个勾（`上✓ 下· 左✓ 右·`），转完自动进下一项；
+- 等待时在终端底部用一行实时显示 `左[..] 右[..] LT RT`，不刷屏；
+- 单项超时 20 秒（`--max-wait` 可调），`Enter` 跳过、`r` 重测；
+- 报文流断 1 秒会自动重置 URB 并提示，不会像上次那样静默 22 秒。
 
 **用法**:
 ```bash
 pkill -TERM steam
 sudo python3 scripts/flydigi_button_probe.py --note "Windows 全默认键位"
-sudo python3 scripts/flydigi_button_probe.py --only m1,m2,ls_right
-sudo python3 scripts/flydigi_button_probe.py --free
+sudo python3 scripts/flydigi_button_probe.py --no-keys        # 只测两个摇杆
+sudo python3 scripts/flydigi_button_probe.py --only m1,m2
+sudo python3 scripts/flydigi_button_probe.py --only rs_up     # 单项方向重测
+sudo python3 scripts/flydigi_button_probe.py --free           # 现场看任意键
 ```
 
-**当前状态**: 事件逻辑已用合成报文离线验证（单次按下、30 Hz 通断、模拟轴满偏、
-基线漂移四种情况），尚未在真机上跑。
+**产物**: `captures/inputs_<时间戳>.bin`（报文流）+ `.json`（每项签名）
+
+**已验证**: 2026-11-19 全量跑通 21 键；摇杆逻辑用合成报文离线验证
+（整圈、斜推不误判、按错键不误判、方向反了不通过）。
+
+### `flydigi_capture_decode.py` — 离线解码抓包
+
+**作用**: 不连硬件，把 `captures/inputs_*.bin` 拆成"断流/按键时间段/
+静止期字节范围/活动段"，用于复核探针结果或分析别人给的抓包。
+
+```bash
+python3 scripts/flydigi_capture_decode.py captures/inputs_20261119-000752.bin
+python3 scripts/flydigi_capture_decode.py <bin> --segments
+```
 
 ### `flydigi_2.4g_raw_motion_test.py` — 主实验：开启 2.4G 体感流 ⭐
 
