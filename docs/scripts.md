@@ -88,8 +88,9 @@ sudo python3 scripts/flydigi_accel_probe.py --try-raw   # 附带试 raw 流开�
 
 **产物**: `captures/accel_<时间>.bin` + `.json`
 
-**当前结论**: 标准报文里没有加速度数据（`[21..24]` 在 45° 横滚时不动），
-详见 [inputs-quickref.md](inputs-quickref.md) 第 6 节。本脚本用于最终确认。
+**实测结论**（2026-11-19，`captures/accel_20261119-011738.bin`）: 七种静态姿态下
+`[14..16]` 均值全 0（陀螺仪），只有 `[24]` 随正面朝下 +6，但上下颠时不动 →
+标准报文里没有可用的加速度数据。详见 [inputs-quickref.md](inputs-quickref.md) 第 6 节。
 
 ### `flydigi_capture_to_text.py` — 抓包转文本存档
 
