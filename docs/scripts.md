@@ -75,6 +75,22 @@ sudo python3 scripts/flydigi_motion_capture.py
 **已验证**（2026-11-19）: `[14..16]` 是三轴角速度（`int8`，约 89 Hz），
 `[21..24]` 是状态字节不是姿态。详见 [findings-motion.md](findings-motion.md)。
 
+### `flydigi_accel_probe.py` — 加速度计探测（静态姿态法）
+
+**作用**: 让手柄保持 7 种静态姿态各录 2 秒，再录一段"水平上下颠"。
+角速度静止恒为 0、加速度计随重力方向变化，所以跨姿态极差 ≥8 的字节
+就是加速度计候选。每个姿态只按一次回车，不掐时间。
+
+```bash
+sudo python3 scripts/flydigi_accel_probe.py
+sudo python3 scripts/flydigi_accel_probe.py --try-raw   # 附带试 raw 流开关（实验性）
+```
+
+**产物**: `captures/accel_<时间>.bin` + `.json`
+
+**当前结论**: 标准报文里没有加速度数据（`[21..24]` 在 45° 横滚时不动），
+详见 [inputs-quickref.md](inputs-quickref.md) 第 6 节。本脚本用于最终确认。
+
 ### `flydigi_capture_to_text.py` — 抓包转文本存档
 
 **作用**: 把 `captures/*.bin` 转成 `data/txt/*.txt`（CSV / 十六进制转储），

@@ -4,6 +4,7 @@
 > Windows 全默认键位，未开厂商流）
 > 测量脚本：`scripts/flydigi_button_probe.py` + `scripts/flydigi_capture_decode.py`
 > 日期：2026-11-19
+> 速查版（按键/轴/体感/加速度计一页看完）：[inputs-quickref.md](inputs-quickref.md)
 
 ## 结论一句话
 
