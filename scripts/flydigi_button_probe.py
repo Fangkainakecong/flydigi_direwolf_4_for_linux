@@ -335,7 +335,7 @@ def prompt(msg):
     return input("    （直接回车 = 跳过，输入 r = 重测）> ").strip().lower()
 
 
-def ask_key(probe, key, results, tag=''):
+def ask_key(probe, key, results, tag='', retry=True, max_wait=25.0):
     while True:
         line = prompt(f"请按一次 {key}，然后松开")
         if line == 'r':
@@ -344,14 +344,18 @@ def ask_key(probe, key, results, tag=''):
             results.append({'key': key + tag, 'status': 'skipped'})
             print("    已跳过")
             return
-        status, info = probe.capture_event()
+        status, info = probe.capture_event(max_wait=max_wait)
         if status == 'event':
             print(f"    ✓ 收到 {key}：{describe(info)}")
             results.append({'key': key + tag, 'status': 'ok', **info})
             return
         if status == 'retry':
             continue
-        print("    ✗ 25 秒内没检测到任何变化，再试一次？")
+        if not retry:
+            print(f"    ✗ {max_wait:.0f} 秒内没有变化 —— 记录为“不可见”")
+            results.append({'key': key + tag, 'status': 'timeout'})
+            return
+        print(f"    ✗ {max_wait:.0f} 秒内没检测到任何变化，再试一次？")
         line = input("    （回车重试，输入 s + 回车跳过）> ").strip().lower()
         if line == 's':
             results.append({'key': key + tag, 'status': 'timeout'})
@@ -423,7 +427,8 @@ def main():
         first = keys[0]
         print("\n=== 阶段 A：不开厂商流（cmd17 之前）===")
         print(f"这一步回答：{first} 在没有厂商流时，Linux 能不能看到。")
-        ask_key(probe, first, results, tag='(raw关闭)')
+        print("如果完全没反应，那是正常的 —— 15 秒后自动继续。")
+        ask_key(probe, first, results, tag='(raw关闭)', retry=False, max_wait=15)
 
         if args.no_raw:
             print("\n--no-raw：跳过阶段 B")
