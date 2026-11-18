@@ -6,6 +6,35 @@
 
 ## 脚本清单
 
+### `flydigi_button_probe.py` — 按键探针（事件驱动，推荐）⭐
+
+**作用**: 弄清 M1/M2/FN/Turbo（以及任何板载重映射后的键）在 USB 报文里的位置。
+**不用掐秒表**：脚本自己从报文里检测按下/松开，检测到就自动进下一个。
+
+**流程**:
+1. 静止 2 秒做基线，自动求出“稳定字节集合”，摇杆/陀螺噪声字节被排除；
+   之后只有稳定字节变化才算按键事件。
+2. **阶段 A**：不开厂商流，先测一次 M1 —— 回答“默认状态能不能看到”。
+3. **阶段 B**：发 cmd17 开厂商流，重新校准，再逐个测 M1/M2/FN/Turbo。
+4. 每个键：提示“请按一次 X” → 检测到事件 → 打印签名（字节/值/时长/标准[2]是否变）。
+   25 秒无事件则提示重试；回车可跳过，`r` 可重测。
+5. 结束可选进入**自由记录模式**：按任意键打印一个签名，用于验证
+   “Windows 里把 M2 改成 L3 后 Linux 收到什么”。
+
+**产物**: `captures/buttons_<时间戳>.bin`（报文流）+
+`captures/buttons_<时间戳>.json`（基线、稳定字节、每个键的签名）
+
+**用法**:
+```bash
+pkill -TERM steam
+sudo python3 scripts/flydigi_button_probe.py
+sudo python3 scripts/flydigi_button_probe.py --free      # 直接自由记录
+sudo python3 scripts/flydigi_button_probe.py --keys M1,M2,M3
+```
+
+**当前状态**: 逻辑已用合成报文离线验证（单次按下、30Hz 通断都只算一个事件），
+尚未在真机上跑。
+
 ### `flydigi_2.4g_raw_motion_test.py` — 主实验：开启 2.4G 体感流 ⭐
 
 **作用**: 向 2.4G dongle (045e:028e) 发送飞智厂商指令 17（开启 raw data 流），
@@ -25,6 +54,9 @@ sudo python3 scripts/flydigi_2.4g_raw_motion_test.py
 
 **当前状态**: 传输层已验证（IN 读取 ~1000Hz ✓、rumble OUT ✓、厂商指令1 ACK ✓），
 指令 17 的体感流验证进行中。
+
+> 注：该脚本靠时间窗让用户按 M1/M2/FN/Turbo（“0-3s 按 M1”），人做不到。
+> 按键部分已由 `flydigi_button_probe.py` 取代；此脚本现在只用于体感/流测试。
 
 ### `flydigi_2.4g_usbfs_probe.py` — 传输层验证诊断（分阶段 usbmon 抓包）
 
