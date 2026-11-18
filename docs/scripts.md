@@ -1,0 +1,74 @@
+# 飞智冰原狼4 (Direwolf 4) 实验脚本
+
+> 配套方案文档: [docs/plan.md](../docs/flydigi-dw4-2.4g-gyro-plan.md)
+> 全部脚本需 sudo 运行（直接操作 USB 设备），运行结束自动恢复 xpad 驱动
+> 日期: 2026-11-18
+
+## 脚本清单
+
+### `flydigi_2.4g_raw_motion_test.py` — 主实验：开启 2.4G 体感流 ⭐
+
+**作用**: 向 2.4G dongle (045e:028e) 发送飞智厂商指令 17（开启 raw data 流），
+随后监测 12 秒输入流，验证体感报文（`0x04` 开头 / `0xEF` 标记，陀螺仪@偏移18-22、
+加速度计@偏移24-28）是否出现，并在 0-3s/3-6s/6-9s/9-12s 分别按
+M1/M2/FN/Turbo，检查这四个键是否藏在厂商报文里。
+
+**流程**: 自动定位手柄 → 卸载 xpad → usbfs 独占接口 → 发指令1(ACK验证) →
+发指令17 → 读流12秒 → 重载 xpad。
+
+**产物**: `/tmp/opencode/raw_stream.bin`（带时间戳的全量报文）
+
+**用法**:
+```bash
+sudo python3 scripts/flydigi_2.4g_raw_motion_test.py
+```
+
+**当前状态**: 传输层已验证（IN 读取 ~1000Hz ✓、rumble OUT ✓、厂商指令1 ACK ✓），
+指令 17 的体感流验证进行中。
+
+### `flydigi_2.4g_usbfs_probe.py` — 传输层验证诊断（分阶段 usbmon 抓包）
+
+**作用**: 诊断/验证 usbfs + 异步 URB 传输层的完整链路。自动开 usbmon 抓总线数据，
+分阶段执行: A(xpad在位基线) → B(卸xpad+独占+读IN) → C(发rumble×3) →
+D(发厂商指令1) → E(收尾)，最后汇总"线上实际发生的事件"与阶段对照。
+
+**用法**:
+```bash
+sudo python3 scripts/flydigi_2.4g_usbfs_probe.py
+```
+
+**已验证的结论**（2026-11-18）:
+- usbfs 异步 URB 读 IN 正常: 3 秒 2997 包（~1000Hz 标准 XInput 流 `00 14 00 ...`）
+- 中断 OUT (EP 0x05) 写 rumble: 完成 status=0
+- 厂商指令 1 (0xA5 5A A5 信封): ACK `a5 5a a5 01 02 03` — **厂商通道可用**
+
+### `flydigi_stick_monitor.py` — 摇杆轴实时监听（无依赖）
+
+**作用**: 裸读 evdev 事件（不需要 python-evdev），每秒打印各摇杆/扳机轴的
+值域与变化幅度。用于验证 2.4G 模式下 xpad 手柄数据质量
+（满量程 ±32768、死区、静止噪音），排查体感是否被错误映射进摇杆。
+
+**用法**:
+```bash
+python3 scripts/flydigi_stick_monitor.py            # 自动找手柄节点
+python3 scripts/flydigi_stick_monitor.py /dev/input/event6
+```
+
+**已验证的结论**（2026-11-17）:
+- 推摇杆满量程正常输出（±32768 连续值），2.4G 手柄功能无损坏
+- 静止时 ±770 范围内 64 一档的量化抖动 = 摇杆噪音 + 未校准中心偏移，非体感映射
+
+## 技术要点（踩坑记录）
+
+1. **usbfs 普通 `write()` 对中断端点返回 EINVAL** — 必须用
+   `USBDEVFS_SUBMITURB/REAPURBNDELAY` 异步 URB
+2. **ioctl 编码必须用真实的 `struct usbdevfs_urb` 大小（64 位 = 56 字节）**，
+   否则 ENOTTY
+3. **Python `fcntl.ioctl` 会复制缓冲区 / 32 位截断大地址** — 必须用
+   `libc.ioctl`（ctypes `c_void_p` 传完整地址），否则内核记录的
+   `as->userurb` 指向失效内存（症状: reap 垃圾数据、DISCARDURB EINVAL、曾导致段错误）
+4. **URB 结构体和数据缓冲区必须保活到 reap**（pending 字典持有引用），
+   内核完成时会把 status/actual_length 写回提交时的结构体内存
+5. xpad 驱动需先卸载才能 usbfs 独占接口；脚本用 `modprobe -r xpad` /
+   `modprobe xpad` 包裹（`USBDEVFS_DISCONNECT` ioctl 不可靠）
+6. 手柄"断开"提示来自 Steam（evdev 节点随 xpad 卸载消失），2.4G 链路本身不受影响
