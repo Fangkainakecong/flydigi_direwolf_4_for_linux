@@ -13,14 +13,15 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 3. **按键→键鼠映射**：按配置文件生效（对标空间站的 per-game 映射）
 4. **配置切换**：按键触发 profile 切换
 
-## 当前状态 (2026-11-18)
+## 当前状态 (2026-11-19)
 
 - ✅ usbfs 异步 URB 传输层验证通过（IN 读 ~1000Hz、rumble OUT、厂商指令 ACK）
-- ✅ `A5 5A A5` 信封 cmd1/cmd17 均被 dongle ACK（与上游实测的 Vader 4 Pro 不同）
-- ✅ 输入报文 [14..16] 确认存在**厂商注入区**（运动数据/命令回包，offset 14 起）
-- ⏳ 老方言命令探测进行中（cmd16 识别 / cmd80 sub4 配置版本）—
-  `scripts/flydigi_old_dialect_probe.py`
-- ⏳ 体感字节布局解码进行中（captures/motion_phases.bin 为受控实验数据）
+- ✅ 32 字节输入报文完全解码（标准按钮字、扳机、四轴、飞智键位位图）
+- ✅ 老方言通道打通：cmd16 识别（`DeviceType=132` FP4 / 固件 4.0.7.2）、
+  cmd80 sub4 配置版本、cmd33 读 4 个槽位的 840 字节配置 blob
+- ✅ 体感定位：`[14..16]` 是三轴角速度（`int8`，约 89 Hz）；`[21..24]` 不是姿态
+- ⏳ `[16]` 轴编码、体感量纲标定
+- ⏳ 守护进程（uinput + 体感→鼠标 + profile 切换）尚未实现
 
 ## 关键结论（详见 docs/）
 
@@ -38,7 +39,8 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 scripts/          实验脚本（需 sudo，跑完自动恢复 xpad）
 docs/             协议文档 + 方案 + 脚本说明
 reference/openflydigi/   上游确认有用的代码（参考件，import 路径未改）
-captures/         抓包数据（git 忽略）
+captures/         原始抓包 .bin（git 忽略，仅本地）
+data/txt/         抓包的文本存档（进仓库，索引见 data/MANIFEST.md）
 ```
 
 上游仓库：https://github.com/（openflydigi 本地克隆在 ~/projects/openflydigi-main）

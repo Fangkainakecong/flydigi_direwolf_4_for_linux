@@ -72,6 +72,21 @@ sudo python3 scripts/flydigi_motion_capture.py
 
 **产物**: `captures/motion_<时间>.bin` + `.json`（阶段标记与逐字节范围）
 
+**已验证**（2026-11-19）: `[14..16]` 是三轴角速度（`int8`，约 89 Hz），
+`[21..24]` 是状态字节不是姿态。详见 [findings-motion.md](findings-motion.md)。
+
+### `flydigi_capture_to_text.py` — 抓包转文本存档
+
+**作用**: 把 `captures/*.bin` 转成 `data/txt/*.txt`（CSV / 十六进制转储），
+作为进仓库的长期数据形式；同时重写 `data/MANIFEST.md` 索引。文件头记录源
+bin 的 sha256。格式说明见 [data.md](data.md)。
+
+```bash
+python3 scripts/flydigi_capture_to_text.py --all
+python3 scripts/flydigi_capture_to_text.py captures/motion_20261119-003907.bin
+python3 scripts/flydigi_capture_to_text.py --blob captures/blob_slot0_*.bin
+```
+
 ### `flydigi_capture_decode.py` — 离线解码抓包
 
 **作用**: 不连硬件，把 `captures/inputs_*.bin` 拆成"断流/按键时间段/
