@@ -6,34 +6,39 @@
 
 ## 脚本清单
 
-### `flydigi_button_probe.py` — 按键探针（事件驱动，推荐）⭐
+### `flydigi_button_probe.py` — 全输入探针（事件驱动，推荐）⭐
 
-**作用**: 弄清 M1/M2/FN/Turbo（以及任何板载重映射后的键）在 USB 报文里的位置。
-**不用掐秒表**：脚本自己从报文里检测按下/松开，检测到就自动进下一个。
+**作用**: 弄清**所有按键和轴**在 USB 报文里的位置 —— 21 个按键
+（A/B/X/Y、LB/RB、LT/RT、L3/R3、Start/Back/Home、十字四向、M1/M2、FN、Turbo）
++ 8 个轴动作（左右摇杆四方向满偏）。**不用掐秒表**：脚本自己从报文里检测
+按下/松开，检测到就自动进下一个。
 
 **流程**:
-1. 静止 2 秒做基线，自动求出“稳定字节集合”，摇杆/陀螺噪声字节被排除；
-   之后只有稳定字节变化才算按键事件。
+1. 静止 2 秒做基线，每个字节记录 min/max 再留一份等于噪声幅度的余量：
+   数字位（基线 0）任何置位都算；摇杆（基线 ±几百抖动）只有满偏才越界，
+   抖动和零漂不会误触发。
 2. **阶段 A**：不开厂商流，先测一次 M1 —— 回答“默认状态能不能看到”。
-3. **阶段 B**：发 cmd17 开厂商流，重新校准，再逐个测 M1/M2/FN/Turbo。
-4. 每个键：提示“请按一次 X” → 检测到事件 → 打印签名（字节/值/时长/标准[2]是否变）。
-   25 秒无事件则提示重试；回车可跳过，`r` 可重测。
-5. 结束可选进入**自由记录模式**：按任意键打印一个签名，用于验证
+3. **阶段 B**：发 cmd17 开厂商流，重新校准，再逐项测 29 个输入。
+4. 每项：提示 → 检测到事件 → 打印签名（字节/取值或范围/时长/标准[2]是否变）。
+   **6 秒**内无反应自动跳过，结束时列出漏掉的项和重跑命令。
+5. 每个输入开测前有 0.3 秒“静止对齐”：摇杆自动校零导致的漂移会被吸收，
+   不会级联误判。
+6. 结束可选进入**自由记录模式**：按任意键打印一个签名，用于验证
    “Windows 里把 M2 改成 L3 后 Linux 收到什么”。
 
-**产物**: `captures/buttons_<时间戳>.bin`（报文流）+
-`captures/buttons_<时间戳>.json`（基线、稳定字节、每个键的签名）
+**产物**: `captures/inputs_<时间戳>.bin`（报文流）+
+`captures/inputs_<时间戳>.json`（基线 min/max/margin、每项签名）
 
 **用法**:
 ```bash
 pkill -TERM steam
-sudo python3 scripts/flydigi_button_probe.py
-sudo python3 scripts/flydigi_button_probe.py --free      # 直接自由记录
-sudo python3 scripts/flydigi_button_probe.py --keys M1,M2,M3
+sudo python3 scripts/flydigi_button_probe.py --note "Windows 全默认键位"
+sudo python3 scripts/flydigi_button_probe.py --only m1,m2,ls_right
+sudo python3 scripts/flydigi_button_probe.py --free
 ```
 
-**当前状态**: 逻辑已用合成报文离线验证（单次按下、30Hz 通断都只算一个事件），
-尚未在真机上跑。
+**当前状态**: 事件逻辑已用合成报文离线验证（单次按下、30 Hz 通断、模拟轴满偏、
+基线漂移四种情况），尚未在真机上跑。
 
 ### `flydigi_2.4g_raw_motion_test.py` — 主实验：开启 2.4G 体感流 ⭐
 
