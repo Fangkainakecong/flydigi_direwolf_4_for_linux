@@ -34,6 +34,44 @@ sudo python3 scripts/flydigi_button_probe.py --free           # 现场看任意�
 **已验证**: 2026-11-19 全量跑通 21 键；摇杆逻辑用合成报文离线验证
 （整圈、斜推不误判、按错键不误判、方向反了不通过）。
 
+### `flydigi_old_dialect_probe.py` — 老方言识别（cmd16 / cmd80 sub4）
+
+**作用**: 确认老协议通道可用，读 `DeviceType / uid / 固件 / 电量 / 连接方式 /
+当前槽位`，以及 4 个槽位的配置版本号。10 秒，不需要按键。
+
+```bash
+sudo python3 scripts/flydigi_old_dialect_probe.py
+```
+
+**已验证**（2026-11-19）: `DeviceType=132 (FP4)`、固件 `4.0.7.2`、
+回包注入在 `[14]`、应答在 `[15]`。详见
+[findings-legacy-measured.md](findings-legacy-measured.md)。
+
+### `flydigi_legacy_blob_read.py` — 读全部 4 个配置槽位 ⭐
+
+**作用**: `cmd33` 读 840 字节配置 blob（84 包 × 10 字节），解析键位表，
+横向对比 4 个槽位；同时打印识别信息和 4 个 data_version。
+
+```bash
+sudo python3 scripts/flydigi_legacy_blob_read.py
+sudo python3 scripts/flydigi_legacy_blob_read.py --slot 2
+```
+
+**已验证**（2026-11-19）: 槽位 0/2/3 各 840 字节读全，槽位 1 为空（0 包）；
+解析结果与上游 `mapping.py` 一致。产物 `captures/blob_slot<N>_<时间>.bin`。
+
+### `flydigi_motion_capture.py` — 体感采集（回车打标记，不掐时间）
+
+**作用**: 连续录报文，每个动作"回车开始 → 做 → 回车结束"，按标记切片
+统计 `[14..16]` / `[21..24]` 的范围。分 A 段（不发 cmd17）和 B 段（发 cmd17），
+用来判断厂商流开关是否改变运动数据。
+
+```bash
+sudo python3 scripts/flydigi_motion_capture.py
+```
+
+**产物**: `captures/motion_<时间>.bin` + `.json`（阶段标记与逐字节范围）
+
 ### `flydigi_capture_decode.py` — 离线解码抓包
 
 **作用**: 不连硬件，把 `captures/inputs_*.bin` 拆成"断流/按键时间段/
