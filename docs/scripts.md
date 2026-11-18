@@ -90,7 +90,25 @@ sudo python3 scripts/flydigi_accel_probe.py --try-raw   # 附带试 raw 流开�
 
 **实测结论**（2026-11-19，`captures/accel_20261119-011738.bin`）: 七种静态姿态下
 `[14..16]` 均值全 0（陀螺仪），只有 `[24]` 随正面朝下 +6，但上下颠时不动 →
-标准报文里没有可用的加速度数据。详见 [inputs-quickref.md](inputs-quickref.md) 第 6 节。
+标准报文里没有可用的加速度数据。注意：**硬件本身是六轴**，加速度计只是没有出现在
+2.4G XInput 报文里，见 [findings-public-sources.md](findings-public-sources.md)。
+
+### `flydigi_dinput_probe.py` — DInput 模式被动探针（只读）
+
+**作用**: 切到 DInput（2.4G 档，长按 `FN+A`，指示灯变蓝）后，枚举所有
+Flydigi/手柄相关的 `/dev/hidraw*`，被动读取并统计首字节、长度、是否出现
+`0x04`/`0xEF` 厂商报文，同时按仓库格式落盘。**不发送任何 USB 命令，不改手柄状态。**
+
+```bash
+sudo python3 scripts/flydigi_dinput_probe.py        # 读 20 秒
+sudo python3 scripts/flydigi_dinput_probe.py 30
+```
+
+**产物**: `captures/dinput_<时间>.bin` + `.json`
+
+**目的**: 同代 Vader 3 Pro 在 DInput 下用 `0x04/0xEF` 报文输出 12 位三轴陀螺仪
+和 int16 三轴加速度（4096 = 1g）。如果冰原狼4 也一样，就能拿到完整六轴，
+而不必再猜 XInput 的 int8 扩展。见 [findings-public-sources.md](findings-public-sources.md)。
 
 ### `flydigi_capture_to_text.py` — 抓包转文本存档
 
