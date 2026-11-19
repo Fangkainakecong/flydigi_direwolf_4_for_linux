@@ -1,0 +1,427 @@
+{
+  "device": "/dev/bus/usb/002/002",
+  "time": "2026-11-19T21:58:32",
+  "identify": {
+    "device_type": 132,
+    "uid": "cf536538",
+    "fw": "4.0.7.2",
+    "battery": 2,
+    "connect": 0,
+    "slot": 3
+  },
+  "slots": {
+    "0": {
+      "present": true,
+      "length": 840,
+      "data_version": 58742,
+      "title": "配置1",
+      "clean": false,
+      "daemon_ok": true,
+      "blockers": [],
+      "notes": [
+        "8 个键是 turbo（固件自动连发）：right, a, b, x, y, rb, m1, m2"
+      ],
+      "remaps": [
+        {
+          "key": "right",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 0,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "a",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 1,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "b",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 1,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "x",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 1,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "y",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 1,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "rb",
+          "target": 255,
+          "target_name": "default(自身)",
+          "mode": 1,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "m1",
+          "target": 5,
+          "target_name": "b",
+          "mode": 1,
+          "freq": 20,
+          "turbo": true
+        },
+        {
+          "key": "m2",
+          "target": 4,
+          "target_name": "a",
+          "mode": 1,
+          "freq": 20,
+          "turbo": true
+        }
+      ],
+      "keyboard_keys": [],
+      "macros": [],
+      "turbo_keys": [
+        "right",
+        "a",
+        "b",
+        "x",
+        "y",
+        "rb",
+        "m1",
+        "m2"
+      ],
+      "motion": {
+        "target": 0,
+        "target_name": "off",
+        "key1": "lt",
+        "enable_type": 0,
+        "enable_name": "click",
+        "dead_zone": 8,
+        "sensitivity_xy": [
+          25,
+          25
+        ],
+        "use_mode": 0,
+        "use_mode_name": "fps",
+        "key2": "up"
+      },
+      "trigger_motor_enabled": true,
+      "packets": 82,
+      "raw_bin": "captures/blob_20261119-215834_slot0.bin"
+    },
+    "1": {
+      "present": true,
+      "length": 840,
+      "data_version": 42348,
+      "title": "配置2",
+      "clean": false,
+      "daemon_ok": true,
+      "blockers": [],
+      "notes": [],
+      "remaps": [
+        {
+          "key": "m1",
+          "target": 15,
+          "target_name": "r3",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "m2",
+          "target": 14,
+          "target_name": "l3",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        }
+      ],
+      "keyboard_keys": [],
+      "macros": [],
+      "turbo_keys": [],
+      "motion": {
+        "target": 0,
+        "target_name": "off",
+        "key1": "lt",
+        "enable_type": 0,
+        "enable_name": "click",
+        "dead_zone": 8,
+        "sensitivity_xy": [
+          25,
+          25
+        ],
+        "use_mode": 0,
+        "use_mode_name": "fps",
+        "key2": "up"
+      },
+      "trigger_motor_enabled": true,
+      "packets": 83,
+      "raw_bin": "captures/blob_20261119-215834_slot1.bin"
+    },
+    "2": {
+      "present": true,
+      "length": 840,
+      "data_version": 24982,
+      "title": "配置3",
+      "clean": false,
+      "daemon_ok": false,
+      "blockers": [
+        "up→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "right→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "down→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "left→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "a→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "b→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "back→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "x→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "y→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "start→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "lb→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "rb→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "lt→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "rt→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "l3→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "r3→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "m1→keyboard(死键)：固件吃掉此键，daemon 收不到",
+        "m2→keyboard(死键)：固件吃掉此键，daemon 收不到"
+      ],
+      "notes": [
+        "1 个键是 turbo（固件自动连发）：down",
+        "板载体感映射开启（mouse）：XInput 模式下没有鼠标通道，一般惰性，但建议在空间站关掉"
+      ],
+      "remaps": [
+        {
+          "key": "up",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "right",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "down",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 15,
+          "turbo": true
+        },
+        {
+          "key": "left",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "a",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "b",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "back",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "x",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "y",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "start",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "lb",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "rb",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "lt",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "rt",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "l3",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "r3",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "m1",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        },
+        {
+          "key": "m2",
+          "target": 254,
+          "target_name": "keyboard(死键)",
+          "mode": 0,
+          "freq": 0,
+          "turbo": false
+        }
+      ],
+      "keyboard_keys": [
+        "up",
+        "right",
+        "down",
+        "left",
+        "a",
+        "b",
+        "back",
+        "x",
+        "y",
+        "start",
+        "lb",
+        "rb",
+        "lt",
+        "rt",
+        "l3",
+        "r3",
+        "m1",
+        "m2"
+      ],
+      "macros": [],
+      "turbo_keys": [
+        "down"
+      ],
+      "motion": {
+        "target": 3,
+        "target_name": "mouse",
+        "key1": null,
+        "enable_type": 0,
+        "enable_name": "click",
+        "dead_zone": 0,
+        "sensitivity_xy": [
+          25,
+          25
+        ],
+        "use_mode": 0,
+        "use_mode_name": "fps",
+        "key2": null
+      },
+      "trigger_motor_enabled": true,
+      "packets": 84,
+      "raw_bin": "captures/blob_20261119-215834_slot2.bin"
+    },
+    "3": {
+      "present": true,
+      "length": 840,
+      "data_version": 61301,
+      "title": "配置4",
+      "clean": false,
+      "daemon_ok": true,
+      "blockers": [],
+      "notes": [
+        "板载体感映射开启（mouse）：XInput 模式下没有鼠标通道，一般惰性，但建议在空间站关掉"
+      ],
+      "remaps": [],
+      "keyboard_keys": [],
+      "macros": [],
+      "turbo_keys": [],
+      "motion": {
+        "target": 3,
+        "target_name": "mouse",
+        "key1": null,
+        "enable_type": 0,
+        "enable_name": "click",
+        "dead_zone": 0,
+        "sensitivity_xy": [
+          25,
+          25
+        ],
+        "use_mode": 0,
+        "use_mode_name": "fps",
+        "key2": null
+      },
+      "trigger_motor_enabled": true,
+      "packets": 84,
+      "raw_bin": "captures/blob_20261119-215834_slot3.bin"
+    }
+  },
+  "current_slot": 3,
+  "current_slot_daemon_ok": true
+}

@@ -59,6 +59,12 @@ PHASES = [
     ('select_b', '按住 SELECT（Back/视图键），再按 B，然后都松开'),
     ('select_x', '按住 SELECT（Back/视图键），再按 X，然后都松开'),
     ('select_y', '按住 SELECT（Back/视图键），再按 Y，然后都松开'),
+    # 下面四个会真的切**板载**槽（固件行为）。只在需要验证 X/Y 对应关系时跑；
+    # 切到槽 2 会碰到键盘映射死键，用 FN+Y（或 FN+A/B/X）转回槽 3。
+    ('fn_a', '按住 FN，再按 A（会切到板载槽 0）'),
+    ('fn_b', '按住 FN，再按 B（会切到板载槽 1）'),
+    ('fn_x', '按住 FN，再按 X（应切到板载槽 2，里面有键盘映射，危险）'),
+    ('fn_y', '按住 FN，再按 Y（应切到板载槽 3）'),
 ]
 
 
@@ -71,7 +77,11 @@ class Recorder(object):
         self.prev_bits = frozenset()
         self.events = []
         self.frames = []
-        self.last_frame = time.time()
+        self.t0 = None          # 抓包起点，落盘时把时间戳归一化到 0
+        # None = 还没在本次采集窗口里收到第一帧。identify() 会把报文吃掉，
+        # 如果沿用上一帧的时间戳，每个阶段都会凭空多出一个 ~1 秒“中断”
+        # （2026-11-19 就是这个假象冒充了“切槽卡顿”）。
+        self.last_frame = None
         self.gap = 0.0
 
     def pump_once(self):
@@ -83,17 +93,30 @@ class Recorder(object):
             return False
         self.link.in_ids.discard(ctx)
         self.link.pump(1)
-        if not d or len(d) < 32:
-            return False
-        if rep.is_reply(d):
+        if not d:
             return False
         now = time.time()
-        if now - self.last_frame > 0.5:
+        # 间隔统计对回包也生效：回包也是流的一部分，丢掉它们会把
+        # “设备还在说话”误判成“流断了”。
+        if self.last_frame is not None:
             self.gap = max(self.gap, now - self.last_frame)
         self.last_frame = now
-        self.frames.append((now, d))
-        self._edges(now, d)
+        if self.t0 is None:
+            self.t0 = now
+        if len(d) < 32 or rep.is_reply(d):
+            return False
+        self.frames.append((now - self.t0, d))
+        self._edges(now - self.t0, d)
         return True
+
+    def begin(self):
+        """开一个新的采集窗口。
+
+        必须在所有 identify/读槽动作**之后**调用：那些动作会消费报文，
+        从上一帧到本窗口第一帧的间隔属于“测量开销”，不是设备停顿。
+        """
+        self.last_frame = None
+        self.gap = 0.0
 
     def _edges(self, now, data):
         std = rep.std_buttons(data)
@@ -176,11 +199,11 @@ def modifier_used(summary):
     return '没检测到修饰键'
 
 
-def safe_identify(link, tries=10, delay=0.25):
+def safe_identify(link, tries=6, delay=0.2):
     """cmd16 识别，带重试。
 
-    实测切板载槽（SELECT+A/B/X/Y）时输入流会停 0.7–1.0 秒，紧接着 cmd16
-    也可能一时无应答。原来这里直接 `identify(link)['slot']` 会抛
+    实测 FN+A/B 切板载槽之后，cmd16 可能连续几次无应答（输入流本身没断，
+    只是命令通道安静一阵）。原来这里直接 `identify(link)['slot']` 会抛
     TypeError 把整个探针中断，且结果还没落盘。
     """
     for attempt in range(tries):
@@ -256,12 +279,14 @@ def main():
                 if not phases:
                     sys.exit('--phases 没有匹配项。可选：%s'
                              % ', '.join(p[0] for p in PHASES))
+            slot = info['slot']
             for idx, (phase, prompt) in enumerate(phases, 1):
                 print('[%d/%d] %s' % (idx, len(phases), prompt))
                 rec.wait_enter()
 
-                before = safe_identify(link)
-                slot_before = before['slot'] if before else None
+                # 采集窗口内才统计间隔。这里不读槽位：identify() 会消费报文，
+                # 读一次就给每个阶段凭空加一个 ~1 s 的“中断”。
+                rec.begin()
                 start = len(rec.events)
                 t0 = time.time()
                 shown = -1
@@ -275,14 +300,22 @@ def main():
                         sys.stdout.flush()
                 sys.stdout.write('\r' + ' ' * 24 + '\r')
                 gap_before = rec.gap
-                rec.gap = 0.0
+
+                # 只有 FN 组合会被固件当成切槽键；其它阶段不必付 identify 的代价。
+                may_switch = phase.startswith('fn_') or gap_before > 0.3
+                slot_before = slot
                 path_after = dev
-                if gap_before > 0.3:
-                    # 切槽后报文流刚恢复，先排空再问槽位。
-                    link.drain(0.25)
-                    path_after = find_pad()      # 判断是否重新枚举
-                after = safe_identify(link)
-                slot_after = after['slot'] if after else None
+                if may_switch:
+                    if gap_before > 0.3:
+                        link.drain(0.25)
+                        path_after = find_pad()
+                    after = safe_identify(link)
+                    slot_after = after['slot'] if after else None
+                    if slot_after is not None:
+                        slot = slot_after
+                else:
+                    slot_after = slot
+
                 events = rec.events[start:]
                 summary = summarize(events)
                 item = {
@@ -292,6 +325,7 @@ def main():
                     'slot_before': slot_before,
                     'slot_after': slot_after,
                     'slot_changed': slot_before != slot_after,
+                    'slot_checked': may_switch,
                     'max_gap_s': round(gap_before, 3),
                     'path_after': path_after,
                     'reenumerated': path_after != dev,
@@ -303,13 +337,13 @@ def main():
                 print('      位图键: %s   槽位: %s→%s%s'
                       % (' '.join(summary['max_bit_combo']) or '无',
                          slot_before, slot_after,
-                         '  (变了!)' if item['slot_changed'] else ''))
+                         '  (变了!)' if item['slot_changed'] else
+                         ('' if item['slot_checked'] else '  (未读取)')))
                 print('      修饰键: %s' % modifier_used(summary))
-                if gap_before > 0.5:
-                    print('      ⚠ 报文中断 %.1fs%s' % (
-                        gap_before,
-                        '，且设备重新枚举了' if path_after != dev else
-                        '（设备路径没变，只是流停了）'))
+                print('      报文流: %s' % (
+                    '连续' if gap_before <= 0.3 else
+                    '最大间断 %.2fs%s' % (gap_before,
+                                          '，且设备重新枚举了' if path_after != dev else '')))
                 print()
 
     except KeyboardInterrupt:

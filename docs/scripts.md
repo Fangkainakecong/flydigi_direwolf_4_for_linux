@@ -131,6 +131,19 @@ python3 scripts/flydigi_capture_decode.py captures/inputs_20261119-000752.bin
 python3 scripts/flydigi_capture_decode.py <bin> --segments
 ```
 
+### `flydigi_gap_report.py` — 报文流断点报告（排除探针假象）
+
+**作用**: 把抓包按 >0.4 s 切成“连续段”，只在段内统计断点，并打印每段帧率。
+用来区分“设备真掉线”和“探针自己在 identify / 等 Enter”。
+2026-11-19 的“切槽卡顿 1 秒”就是靠它证明是假象的。
+
+```bash
+python3 scripts/flydigi_gap_report.py captures/control_20261119-222738.bin
+python3 scripts/flydigi_gap_report.py --min-gap 0.1 captures/*.bin
+```
+
+判读：`段内断点` 才是真问题；`段间间隔` 是探针停手；段内帧率应 ≈1000 Hz。
+
 ### `flydigi_2.4g_raw_motion_test.py` — 主实验：开启 2.4G 体感流 ⭐
 
 **作用**: 向 2.4G dongle (045e:028e) 发送飞智厂商指令 17（开启 raw data 流），
@@ -260,14 +273,24 @@ Home 短按/长按的行为。这决定 daemon 是不是要自己实现软件四
 
 ```bash
 sudo python3 scripts/flydigi_control_probe.py
-# 只跑不切槽的项目（SELECT 组合放最后，避免把板载槽切乱）
-sudo python3 scripts/flydigi_control_probe.py --phases select_tap,home_short,home_long,fn,turbo,m1,m2
+# 常规按键（不碰会切槽的 FN 组合）
+sudo python3 scripts/flydigi_control_probe.py --phases select_tap,fn,home_short,home_long,turbo,m1,m2
+# 验证 SELECT 组合是空键位（不会切槽）
+sudo python3 scripts/flydigi_control_probe.py --phases select_a,select_b,select_x,select_y
+# 验证 FN 组合 → 板载槽（会真的切槽；槽 2 有键盘映射，危险）
+sudo python3 scripts/flydigi_control_probe.py --phases fn_a,fn_b,fn_y
 ```
 
-**实测结论**（2026-11-19）：固件切槽键是 **FN + A/B/X/Y**（A→槽0、B→槽1），
-切槽时输入流停 0.7–1.0 秒，设备路径不变。
-`SELECT + A/B/X/Y` 是否被固件占用**仍待验证**——探针的 `select_*` 阶段就是测这个，
-每个阶段会打印"实际检测到的修饰键"（SELECT=back / FN=menu），按错会直接指出。
+**实测结论**（2026-11-19）：
+
+- `SELECT + A/B/X/Y` **是空键位**：标准字/位图都是 `back` + 字母，槽位不变。
+  → 可做主机侧软件四槽，零停顿。
+- `FN + A/B/X/Y` 才是固件切槽键（A→槽0、B→槽1）。
+- 之前看到的"切槽停 0.7–1.0 s"是探针假象（`identify()` 消费报文）。现在
+  `Recorder.begin()` 只在采集窗口内统计间隔，回包也算"设备在说话"。
+- Home 短按/长按没有区别；Turbo 在位图可见；M1/M2 的位图名与物理左右相反。
+- 每个阶段会打印 `修饰键: SELECT（back）` / `FN（位图 menu 位）`，按错会指出。
+
 详见 [docs/findings-slot-audit.md](findings-slot-audit.md) §7。
 
 ### `flydigi_uinput_ident_probe.py` — 虚拟设备识别 ⭐

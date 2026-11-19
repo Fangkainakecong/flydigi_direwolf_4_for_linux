@@ -60,21 +60,25 @@ def convert_stream(path, out_path):
     if not recs:
         print(f'跳过空文件 {path}')
         return None
+    # 有的探针写相对时间，有的写 time.time()（绝对值）。统一减掉首帧，
+    # 否则表头会出现 "时长: 1795098501s" 这种荒唐数字。
+    t0 = recs[0][0]
+    dur = recs[-1][0] - t0
     rlen = max(len(d) for _, d in recs)
     lines = [HEADER.format(src=os.path.basename(path), size=len(raw),
                            sha=sha(path), n=len(recs),
-                           dur=recs[-1][0], rlen=rlen)]
+                           dur=dur, rlen=rlen)]
     for ts, d in recs:
         if len(d) < 21:
             continue
         btn = d[2] | (d[3] << 8)
         keys = d[17] | (d[18] << 8) | (d[19] << 16) | (d[20] << 24)
         x = [d[k] if len(d) > k else 0 for k in (14, 15, 16, 21, 22, 23, 24)]
-        lines.append(f'{ts * 1000:.3f},{btn:04x},{d[4]},{d[5]},'
+        lines.append(f'{(ts - t0) * 1000:.3f},{btn:04x},{d[4]},{d[5]},'
                      f'{s16(d, 6)},{s16(d, 8)},{s16(d, 10)},{s16(d, 12)},'
                      f'{keys:08x},' + ','.join(str(v) for v in x))
-    info = write(out_path, lines, len(recs), recs[-1][0], rlen)
-    return dict(kind='报文流', frames=len(recs), dur=recs[-1][0], rlen=rlen,
+    info = write(out_path, lines, len(recs), dur, rlen)
+    return dict(kind='报文流', frames=len(recs), dur=dur, rlen=rlen,
                 **info)
 
 
