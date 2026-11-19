@@ -41,18 +41,20 @@ sys.dont_write_bytecode = True          # 见 blob_audit：别让 root 写 __pyc
 import flydigi_report as rep
 from flydigi_usb import Link, Pad, find_pad, identify
 
+# 顺序很重要：SELECT+A/B/X/Y 实测会切**板载槽**（见 findings-slot-audit.md），
+# 切完槽之后板载配置变了，后面的按键测试就测不准了。所以四个组合键放最后。
 PHASES = [
     ('select_tap', '只按一次 SELECT（Back）'),
-    ('select_a', '按住 SELECT，再按 A，然后都松开'),
-    ('select_b', '按住 SELECT，再按 B，然后都松开'),
-    ('select_x', '按住 SELECT，再按 X，然后都松开'),
-    ('select_y', '按住 SELECT，再按 Y，然后都松开'),
     ('home_short', '短按一次 Home（Logo）'),
     ('home_long', '按住 Home 约 1 秒再松开'),
     ('fn', '按一次 FN（SELECT 右边那颗）'),
     ('turbo', '按一次 Turbo'),
     ('m1', '按一次 M1（背面左）'),
     ('m2', '按一次 M2（背面右）'),
+    ('select_a', '按住 SELECT，再按 A，然后都松开'),
+    ('select_b', '按住 SELECT，再按 B，然后都松开'),
+    ('select_x', '按住 SELECT，再按 X，然后都松开'),
+    ('select_y', '按住 SELECT，再按 Y，然后都松开'),
 ]
 
 
@@ -155,6 +157,21 @@ def summarize(events):
     }
 
 
+def safe_identify(link, tries=10, delay=0.25):
+    """cmd16 识别，带重试。
+
+    实测切板载槽（SELECT+A/B/X/Y）时输入流会停 0.7–1.0 秒，紧接着 cmd16
+    也可能一时无应答。原来这里直接 `identify(link)['slot']` 会抛
+    TypeError 把整个探针中断，且结果还没落盘。
+    """
+    for attempt in range(tries):
+        info = identify(link, settle=0.6)
+        if info:
+            return info
+        time.sleep(delay)
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--seconds', type=float, default=6.0,
@@ -162,6 +179,8 @@ def main():
     ap.add_argument('--free', action='store_true', help='自由记录 60 秒')
     ap.add_argument('--free-seconds', type=float, default=60.0)
     ap.add_argument('--out', default='captures')
+    ap.add_argument('--phases', default=None,
+                    help='只跑指定阶段，逗号分隔，如 select_tap,home_short')
     args = ap.parse_args()
 
     dev = find_pad()
@@ -187,7 +206,7 @@ def main():
         rec = Recorder(link)
         link.drain(0.3)
 
-        info = identify(link)
+        info = safe_identify(link)
         if not info:
             sys.exit('cmd16 无应答：老方言通道不通，先跑 flydigi_old_dialect_probe.py')
         result['identify'] = {k: v for k, v in info.items() if k != 'raw'}
@@ -211,11 +230,19 @@ def main():
                 'summary': summarize(rec.events[start:]),
             })
         else:
-            for idx, (phase, prompt) in enumerate(PHASES, 1):
-                print('[%d/%d] %s' % (idx, len(PHASES), prompt))
+            phases = PHASES
+            if args.phases:
+                want = {n.strip() for n in args.phases.split(',') if n.strip()}
+                phases = [p for p in PHASES if p[0] in want]
+                if not phases:
+                    sys.exit('--phases 没有匹配项。可选：%s'
+                             % ', '.join(p[0] for p in PHASES))
+            for idx, (phase, prompt) in enumerate(phases, 1):
+                print('[%d/%d] %s' % (idx, len(phases), prompt))
                 rec.wait_enter()
 
-                slot_before = identify(link)['slot']
+                before = safe_identify(link)
+                slot_before = before['slot'] if before else None
                 start = len(rec.events)
                 t0 = time.time()
                 shown = -1
@@ -230,7 +257,13 @@ def main():
                 sys.stdout.write('\r' + ' ' * 24 + '\r')
                 gap_before = rec.gap
                 rec.gap = 0.0
-                slot_after = identify(link)['slot']
+                path_after = dev
+                if gap_before > 0.3:
+                    # 切槽后报文流刚恢复，先排空再问槽位。
+                    link.drain(0.25)
+                    path_after = find_pad()      # 判断是否重新枚举
+                after = safe_identify(link)
+                slot_after = after['slot'] if after else None
                 events = rec.events[start:]
                 summary = summarize(events)
                 item = {
@@ -241,6 +274,8 @@ def main():
                     'slot_after': slot_after,
                     'slot_changed': slot_before != slot_after,
                     'max_gap_s': round(gap_before, 3),
+                    'path_after': path_after,
+                    'reenumerated': path_after != dev,
                     'summary': summary,
                     'events': events[:400],
                 }
@@ -251,11 +286,22 @@ def main():
                          slot_before, slot_after,
                          '  (变了!)' if item['slot_changed'] else ''))
                 if gap_before > 0.5:
-                    print('      ⚠ 报文中断 %.1fs：手柄可能切了模式/掉线' % gap_before)
+                    print('      ⚠ 报文中断 %.1fs%s' % (
+                        gap_before,
+                        '，且设备重新枚举了' if path_after != dev else
+                        '（设备路径没变，只是流停了）'))
                 print()
 
     except KeyboardInterrupt:
         print('\n已中断，正在收尾…')
+    except Exception as exc:                       # noqa: BLE001
+        # 任何意外都要先把已采到的数据落盘，否则整轮白跑。
+        print('\n探针异常：%r（已采数据会照常保存）' % (exc,))
+        if rec:
+            for item in result['phases']:
+                if 'summary' not in item and item.get('events'):
+                    item['summary'] = summarize(item['events'])
+        result['error'] = repr(exc)
     finally:
         if claimed:
             try:
@@ -279,6 +325,9 @@ def main():
             json.dump(result, f, ensure_ascii=False, indent=2)
         print('结论: %s' % json_path)
         print('文本存档: python3 scripts/flydigi_capture_to_text.py %s' % bin_path)
+        last = [p for p in result['phases'] if p.get('slot_after') is not None]
+        if last:
+            print('\n当前板载槽位: %s' % last[-1]['slot_after'])
 
 
 if __name__ == '__main__':

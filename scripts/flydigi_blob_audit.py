@@ -259,6 +259,8 @@ def main():
     ap.add_argument('--slot', type=int, action='append',
                     help='只读指定槽位（可重复）')
     ap.add_argument('--json', default=None, help='JSON 输出路径')
+    ap.add_argument('--dump', default=None, metavar='DIR',
+                    help='把每个槽位的原始 840 字节 blob 存到 DIR（默认 captures）')
     ap.add_argument('--no-save', action='store_true', help='不写 JSON')
     ap.add_argument('--from', dest='from_json', default=None,
                     help='离线重读之前保存的 JSON（不连硬件）')
@@ -307,6 +309,7 @@ def main():
         else:
             print('配置版本: 无应答（继续）')
 
+        stamp = time.strftime('%Y%m%d-%H%M%S')
         slots = args.slot if args.slot else [0, 1, 2, 3]
         report = {}
         for slot in slots:
@@ -314,6 +317,14 @@ def main():
             info_slot = analyze(blob)
             info_slot['packets'] = packets
             report[slot] = info_slot
+            if args.dump:
+                d = args.dump or 'captures'
+                os.makedirs(d, exist_ok=True)
+                raw_path = os.path.join(d, 'blob_%s_slot%d.bin' % (stamp, slot))
+                with open(raw_path, 'wb') as f:
+                    f.write(blob)
+                info_slot['raw_bin'] = raw_path
+                print('  原始 blob: %s' % raw_path)
         result['slots'] = report
         result['current_slot'] = info['slot']
         cur = report.get(info['slot'])

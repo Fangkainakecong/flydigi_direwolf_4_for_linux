@@ -242,6 +242,8 @@ daemon 启动前必须确认当前槽没有把 M1/M2 映射成键盘（目标 25
 sudo python3 scripts/flydigi_blob_audit.py
 # 离线重看已保存的结果（不连硬件）
 python3 scripts/flydigi_blob_audit.py --from data/txt/blob_audit_20261119-213331.json
+# 保存每个槽位的原始 840 字节，供 bean_translate --diff 用
+sudo python3 scripts/flydigi_blob_audit.py --dump captures
 ```
 
 **实测结论**: [docs/findings-slot-audit.md](findings-slot-audit.md)
@@ -258,7 +260,13 @@ Home 短按/长按的行为。这决定 daemon 是不是要自己实现软件四
 
 ```bash
 sudo python3 scripts/flydigi_control_probe.py
+# 只跑不切槽的项目（SELECT 组合放最后，避免把板载槽切乱）
+sudo python3 scripts/flydigi_control_probe.py --phases select_tap,home_short,home_long,fn,turbo,m1,m2
 ```
+
+**实测结论**（2026-11-19）：`SELECT + A/B/X/Y` **是固件的切槽键**
+（A→槽0、B→槽1），切槽时输入流停 0.7–1.0 秒，设备路径不变。
+详见 [docs/findings-slot-audit.md](findings-slot-audit.md) §7。
 
 ### `flydigi_uinput_ident_probe.py` — 虚拟设备识别 ⭐
 
@@ -298,12 +306,22 @@ sudo python3 scripts/flydigi_ff_probe.py --pad        # 自动播四档
 sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
 ```
 
-### `flydigi_bean_translate.py` — 厂商出厂文件 → 840 字节 blob（待写）
+### `flydigi_bean_translate.py` — 厂商出厂文件 → 840 字节 blob
 
 **作用**: 读空间站自带的 `default_mapping_<DeviceType>.dat`（本机为
-`default_mapping_132.dat`），转成 840 字节出厂 blob，和板载槽逐字节 diff。
+`default_mapping_132.dat`），转成 840 字节出厂 blob，打印键位表/体感/马达，
+并可和实机读回来的 blob 逐字节对比（按区域归类）。
 
 **前置**: 把 `.dat` 放进 `windows-dump/`，见 [docs/windows-files.md](windows-files.md)。
+
+```bash
+python3 scripts/flydigi_bean_translate.py
+python3 scripts/flydigi_bean_translate.py --diff captures/blob_xxx_slot3.bin
+```
+
+**产物**: `data/txt/factory_fp4_<时间戳>.txt`
+
+**实测结论**: [docs/findings-slot-audit.md](findings-slot-audit.md) §8
 
 
 ## 推荐执行顺序
