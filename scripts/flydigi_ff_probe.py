@@ -53,6 +53,8 @@ import sys
 import threading
 import time
 
+sys.dont_write_bytecode = True          # 见 blob_audit：别让 root 写 __pycache__
+
 try:
     from evdev import UInput, ecodes, ff
 except ImportError:

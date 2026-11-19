@@ -31,6 +31,7 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ M0 硬件实测（SELECT 组合、槽位审计、FF 字节语义）尚未跑
 - ⏳ 守护进程（uinput + 体感→鼠标 + 四槽切换）尚未实现
+- ⏳ 需要你从 Windows 取的文件清单：[docs/windows-files.md](docs/windows-files.md)
 
 ## 关键结论（详见 docs/）
 

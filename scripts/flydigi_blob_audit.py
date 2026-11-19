@@ -29,6 +29,9 @@ import struct
 import sys
 import time
 
+# sudo 运行会以 root 身份写 __pycache__，之后普通用户既删不掉也没法重新编译。
+sys.dont_write_bytecode = True
+
 from flydigi_report import KEY_NAMES
 from flydigi_usb import Pad, Link, find_pad, identify, read_slot, versions
 
@@ -108,20 +111,29 @@ def analyze(blob):
     turbo = [r for r in remaps if r['turbo']]
     trigger_motors = blob[OFF_TRIGGER_MOTORS:OFF_TRIGGER_MOTORS + TRIGGER_MOTORS_LEN]
 
-    # 只有"键位全默认 + 体感映射关闭"才算干净。
+    # 出厂默认的扳机马达块本来就不是全零（`reference/openflydigi/mapping.py`:
+    # 154..183 = 1 个使能字节 + 两侧各 14 字节 min/max/scale），所以"全零"
+    # 不是判定依据，只看使能位。ENABLED = 0，DISABLED = 0xFF（反逻辑）。
+    trigger_motor_enabled = trigger_motors[0] == 0
+
+    # 严格意义的"干净"：键位全默认 + 体感关闭。只用于对照出厂状态。
     clean = not remaps and motion['target'] == 0
 
-    warnings = []
-    if keyboard:
-        warnings.append(
-            '有 %d 个键映射到键盘(254)，Linux 下是死键：%s'
-            % (len(keyboard), ', '.join(r['key'] for r in keyboard)))
-    if macros:
-        warnings.append('有 %d 个宏：%s' % (len(macros), ', '.join(r['key'] for r in macros)))
+    # daemon 唯一在意的判定：有没有物理键被固件吃掉。
+    # 固件把某个键映射到键盘(254)或宏(32) 之后，就不再在标准按钮字/位图里
+    # 报这个键，daemon 收不到它 —— 这才是真正的阻塞项。
+    consumed = keyboard + macros
+    daemon_ok = not consumed
+    blockers = ['%s→%s：固件吃掉此键，daemon 收不到'
+                % (r['key'], r['target_name']) for r in consumed]
+
+    notes = []
+    if turbo:
+        notes.append('%d 个键是 turbo（固件自动连发）：%s'
+                     % (len(turbo), ', '.join(r['key'] for r in turbo)))
     if motion['target'] != 0:
-        warnings.append(
-            '板载体感映射开启（%s），会降低轮询率；主机侧体感应改为 off'
-            % motion['target_name'])
+        notes.append('板载体感映射开启（%s）：XInput 模式下没有鼠标通道，'
+                     '一般惰性，但建议在空间站关掉' % motion['target_name'])
 
     return {
         'present': True,
@@ -129,14 +141,117 @@ def analyze(blob):
         'data_version': struct.unpack_from('<H', blob, OFF_VERSION)[0],
         'title': title_of(blob),
         'clean': clean,
+        'daemon_ok': daemon_ok,
+        'blockers': blockers,
+        'notes': notes,
         'remaps': remaps,
         'keyboard_keys': [r['key'] for r in keyboard],
         'macros': [r['key'] for r in macros],
         'turbo_keys': [r['key'] for r in turbo],
         'motion': motion,
-        'trigger_motors_zero': not any(trigger_motors),
-        'warnings': warnings,
+        'trigger_motor_enabled': trigger_motor_enabled,
     }
+
+
+def normalize(s):
+    """兼容旧版 JSON：缺 daemon_ok/blockers/notes 时按 remaps 现算。"""
+    if not s.get('present'):
+        return s
+    remaps = s.get('remaps') or []
+    if 'daemon_ok' not in s:
+        consumed = [r for r in remaps if r['target'] in (TARGET_KEYBOARD, TARGET_MACRO)]
+        s['daemon_ok'] = not consumed
+        s['blockers'] = ['%s→%s：固件吃掉此键，daemon 收不到'
+                         % (r['key'], r['target_name']) for r in consumed]
+    if 'notes' not in s:
+        notes = []
+        turbo = [r for r in remaps if r.get('turbo')]
+        if turbo:
+            notes.append('%d 个键是 turbo（固件自动连发）：%s'
+                         % (len(turbo), ', '.join(r['key'] for r in turbo)))
+        motion = s.get('motion') or {}
+        if motion.get('target'):
+            notes.append('板载体感映射开启（%s）：XInput 模式下没有鼠标通道，'
+                         '一般惰性，但建议在空间站关掉' % motion.get('target_name'))
+        s['notes'] = notes
+    if 'clean' not in s:
+        s['clean'] = False
+    return s
+
+
+def print_audit(result, report):
+    print('\n=== 槽位审计 ===')
+    for slot in sorted(report):
+        s = normalize(report[slot])
+        if not s['present']:
+            print('槽位%d: 空（%d 包）' % (slot, s.get('packets', 0)))
+            continue
+        verdict = '可接管' if s.get('daemon_ok') else '**被固件占用**'
+        extra = '出厂默认' if s.get('clean') else '已改过'
+        print('槽位%d: %s（%s）  data_version=%d  标题=%r'
+              % (slot, verdict, extra, s['data_version'], s['title']))
+        if s['remaps']:
+            items = []
+            for r in s['remaps'][:12]:
+                t = r['target_name']
+                if r.get('turbo'):
+                    t += '(turbo %dHz)' % r['freq']
+                items.append('%s→%s' % (r['key'], t))
+            more = '' if len(s['remaps']) <= 12 else ' …另 %d 项' % (len(s['remaps']) - 12)
+            print('  改动: ' + '  '.join(items) + more)
+        motion = s.get('motion') or {}
+        if motion.get('target'):
+            print('  体感: %s, 开启键=%s/%s, 灵敏度=%s'
+                  % (motion.get('target_name'), motion.get('key1'),
+                     motion.get('key2'), motion.get('sensitivity_xy')))
+        for b in s.get('blockers', [])[:8]:
+            print('  ✗ ' + b)
+        if len(s.get('blockers', [])) > 8:
+            print('  ✗ …另 %d 个' % (len(s['blockers']) - 8))
+        for n in s.get('notes', []):
+            print('  · ' + n)
+        if s.get('trigger_motor_enabled'):
+            print('  · 扳机马达已启用（不影响 daemon）')
+
+    print('\n=== 结论 ===')
+    cur = report.get(result.get('current_slot'))
+    if cur and cur.get('daemon_ok'):
+        print('当前槽位 %s 可以接管：没有键被固件吃掉，M1/M2/FN/Turbo 都会出现在位图里。'
+              % result.get('current_slot'))
+        if cur.get('notes'):
+            print('  不影响接管，只是要知道：')
+            for n in cur['notes']:
+                print('   · ' + n)
+    elif cur:
+        print('当前槽位 %s 有键被固件吃掉（见上面的 ✗），daemon 收不到这些物理键。'
+              % result.get('current_slot'))
+        print('  处理办法：在 Windows 空间站把这些键改回"默认"，或换到下面的推荐槽。')
+    ok_slots = [slot for slot in sorted(report)
+                if report[slot]['present'] and report[slot].get('daemon_ok')]
+    print('可接管槽位: %s' % (ok_slots or '无'))
+    # 排序偏好（越左越好）：① 没有任何重映射 —— 重映射会让物理键改报目标键，
+    # daemon 就分不清按的是 M1 还是 R3；② 板载体感关闭；③ 没有 turbo。
+    def rank(slot):
+        s = report[slot]
+        return (len(s.get('remaps') or []),
+                1 if (s.get('motion') or {}).get('target', 0) else 0,
+                1 if s.get('turbo_keys') else 0)
+    best = sorted(ok_slots, key=rank)
+    if best:
+        s = report[best[0]]
+        why = []
+        if s.get('remaps'):
+            why.append('有 %d 处重映射' % len(s['remaps']))
+        else:
+            why.append('无重映射，M1/M2 原样上报')
+        if (s.get('motion') or {}).get('target', 0):
+            why.append('板载体感开着（建议关）')
+        print('推荐槽位: %s（%s）' % (best[0], '，'.join(why)))
+        if best[0] != result.get('current_slot'):
+            print('  当前在槽位 %s，用 FN+方向键切到槽位 %s 即可。'
+                  % (result.get('current_slot'), best[0]))
+    else:
+        print('推荐槽位: 无')
 
 
 def main():
@@ -145,7 +260,20 @@ def main():
                     help='只读指定槽位（可重复）')
     ap.add_argument('--json', default=None, help='JSON 输出路径')
     ap.add_argument('--no-save', action='store_true', help='不写 JSON')
+    ap.add_argument('--from', dest='from_json', default=None,
+                    help='离线重读之前保存的 JSON（不连硬件）')
     args = ap.parse_args()
+
+    if args.from_json:
+        with open(args.from_json, encoding='utf-8') as f:
+            result = json.load(f)
+        report = {int(k): v for k, v in result['slots'].items()}
+        result.setdefault('current_slot',
+                          (result.get('identify') or {}).get('slot'))
+        print('离线重读 %s（当前槽位 %s）'
+              % (args.from_json, result['current_slot']))
+        print_audit(result, report)
+        return
 
     dev = find_pad()
     if not dev:
@@ -189,7 +317,7 @@ def main():
         result['slots'] = report
         result['current_slot'] = info['slot']
         cur = report.get(info['slot'])
-        result['current_slot_clean'] = bool(cur and cur.get('clean'))
+        result['current_slot_daemon_ok'] = bool(cur and cur.get('daemon_ok'))
     finally:
         if claimed:
             try:
@@ -200,41 +328,7 @@ def main():
         pad.close()
         print('xpad 已恢复')
 
-    print('\n=== 槽位审计 ===')
-    for slot in sorted(report):
-        s = report[slot]
-        if not s['present']:
-            print('槽位%d: 空（%d 包）' % (slot, s['packets']))
-            continue
-        print('槽位%d: %s  %s  data_version=%d  标题=%r'
-              % (slot, '干净' if s['clean'] else '**非默认**',
-                 '6轴/震动' if s['trigger_motors_zero'] else '含扳机马达配置',
-                 s['data_version'], s['title']))
-        if s['remaps']:
-            items = []
-            for r in s['remaps'][:12]:
-                t = r['target_name']
-                if r['turbo']:
-                    t += '(turbo %dHz)' % r['freq']
-                items.append('%s→%s' % (r['key'], t))
-            more = '' if len(s['remaps']) <= 12 else ' …另 %d 项' % (len(s['remaps']) - 12)
-            print('  改动: ' + '  '.join(items) + more)
-        if s['motion']['target'] != 0:
-            print('  体感: %s, 开启键=%s/%s, 灵敏度=%s'
-                  % (s['motion']['target_name'], s['motion']['key1'],
-                     s['motion']['key2'], s['motion']['sensitivity_xy']))
-        for w in s['warnings']:
-            print('  ⚠ ' + w)
-
-    print('\n=== 结论 ===')
-    if result['current_slot_clean']:
-        print('当前槽位 %d 是干净默认：M1/M2/FN/Turbo 会出现在位图里，daemon 可以接管。'
-              % result['current_slot'])
-    else:
-        print('当前槽位 %d 不是干净默认：先用 Windows 空间站把它恢复成默认，'
-              '否则 M1/M2 可能被固件吞掉。' % result['current_slot'])
-    clean_slots = [s for s in sorted(report) if report[s]['present'] and report[s]['clean']]
-    print('干净槽位: %s' % (clean_slots or '无'))
+    print_audit(result, report)
 
     if not args.no_save:
         os.makedirs('data/txt', exist_ok=True)

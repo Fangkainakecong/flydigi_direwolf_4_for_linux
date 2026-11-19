@@ -232,11 +232,19 @@ daemon 启动前必须确认当前槽没有把 M1/M2 映射成键盘（目标 25
 **判定**: 键位表全 `255` 且体感 target=0 → `clean`；出现 `254` → 警告死键；
 出现宏/Turbo/板载体感 → 列出但不阻止。
 
+**判定**: 只看一件事——**有没有物理键被固件吃掉**。
+映射到键盘(254)或宏(32)的键，固件不再上报，daemon 收不到 → `被固件占用`。
+重映射(如 `m1→r3`)、turbo、板载体感都不阻塞，只作为提示列出。
+
 **产物**: `data/txt/blob_audit_<时间戳>.json`（文本，进仓库）
 
 ```bash
 sudo python3 scripts/flydigi_blob_audit.py
+# 离线重看已保存的结果（不连硬件）
+python3 scripts/flydigi_blob_audit.py --from data/txt/blob_audit_20261119-213331.json
 ```
+
+**实测结论**: [docs/findings-slot-audit.md](findings-slot-audit.md)
 
 ### `flydigi_control_probe.py` — SELECT 组合 / Home / FN / M1 / M2 ⭐
 
@@ -289,6 +297,14 @@ sudo python3 scripts/flydigi_ff_probe.py --fftest     # 配合 sudo fftest
 sudo python3 scripts/flydigi_ff_probe.py --pad        # 自动播四档
 sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
 ```
+
+### `flydigi_bean_translate.py` — 厂商出厂文件 → 840 字节 blob（待写）
+
+**作用**: 读空间站自带的 `default_mapping_<DeviceType>.dat`（本机为
+`default_mapping_132.dat`），转成 840 字节出厂 blob，和板载槽逐字节 diff。
+
+**前置**: 把 `.dat` 放进 `windows-dump/`，见 [docs/windows-files.md](windows-files.md)。
+
 
 ## 推荐执行顺序
 

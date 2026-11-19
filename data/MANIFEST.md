@@ -6,6 +6,7 @@
 |---|---|---|---|---|
 | [accel_20261119-011453.txt](txt/accel_20261119-011453.txt) | 报文流 | 113,625 | 126.4s | `accel_20261119-011453.bin` |
 | [accel_20261119-011738.txt](txt/accel_20261119-011738.txt) | 报文流 | 75,077 | 95.1s | `accel_20261119-011738.bin` |
+| [blob_audit_20261119-213331.json](txt/blob_audit_20261119-213331.json) | 四槽审计 JSON | — | — | `blob_audit_20261119-213331`（现场读 blob） |
 | [blob_slot0_20261119-003029.txt](txt/blob_slot0_20261119-003029.txt) | 配置 blob 十六进制转储 | — | — | `blob_slot0_20261119-003029.bin` |
 | [blob_slot0_20261119-003343.txt](txt/blob_slot0_20261119-003343.txt) | 配置 blob 十六进制转储 | — | — | `blob_slot0_20261119-003343.bin` |
 | [blob_slot2_20261119-003343.txt](txt/blob_slot2_20261119-003343.txt) | 配置 blob 十六进制转储 | — | — | `blob_slot2_20261119-003343.bin` |

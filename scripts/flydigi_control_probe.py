@@ -36,6 +36,8 @@ import struct
 import sys
 import time
 
+sys.dont_write_bytecode = True          # 见 blob_audit：别让 root 写 __pycache__
+
 import flydigi_report as rep
 from flydigi_usb import Link, Pad, find_pad, identify
 
