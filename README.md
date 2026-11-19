@@ -28,10 +28,16 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
   通，客户端→daemon 延迟 0.18–0.30 ms
 - ✅ 方案定稿：[docs/daemon-plan.md](docs/daemon-plan.md)；
   配置样例：[config/default.toml](config/default.toml)
-- ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
-- ⏳ M0 硬件实测（SELECT 组合、槽位审计、FF 字节语义）尚未跑
+- ✅ **M0 完成**：四槽审计（当前槽 3 干净）、按键复核
+  （`SELECT+A/B/X/Y` 是空键位、`FN+A/B/X/Y` 才是固件切槽、Home 无长按、
+  Turbo 在位图可见）、出厂 `.dat` → 840 字节翻译
+- ✅ 传输层断点复核：抓包段内稳定 1000 Hz，此前"切槽卡顿 1 秒"已确认是
+  探针测量假象（`scripts/flydigi_gap_report.py`）
+- ⏳ **M1 透明转发**（下一步）：独占 dongle + 三台 uinput，先把标准键/轴
+  做到和 xpad 一致，再加映射/体感/震动
 - ⏳ 守护进程（uinput + 体感→鼠标 + 四槽切换）尚未实现
-- ⏳ 需要你从 Windows 取的文件清单：[docs/windows-files.md](docs/windows-files.md)
+- ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
+- ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 
 ## 关键结论（详见 docs/）
 

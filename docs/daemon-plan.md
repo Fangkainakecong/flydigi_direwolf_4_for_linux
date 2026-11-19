@@ -668,9 +668,9 @@ python3 -m venv .venv && .venv/bin/pip install evdev
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **M0** | 四个探针 + 共用模块 + 配置样例 | 组合键/槽位结论确定；GUID 正确；FF 延迟 < 2 ms |
-| **M1** | 传输 + 三台 uinput + 配置 A 透传 | `evtest` 全键正常；Steam/RetroArch 识别；拔掉 daemon 手柄恢复 |
-| **M2** | 四槽状态机 + 组合键抑制 + 防卡键 | 按住键切槽不粘键；游戏收不到 `Back+A`；`kill -9` 后无残留按键 |
+| **M0** ✅ | 四个探针 + 共用模块 + 配置样例 | 组合键/槽位结论确定（SELECT+ABXY 为空键位）；GUID 正确；FF 延迟 < 2 ms |
+| **M1** | 传输 + 三台 uinput + **标准输入 1:1 透传** | `evtest` 全键/全轴正常；Steam/RetroArch 识别；Ctrl-C / `kill` 后 xpad 自动恢复、无卡键 |
+| **M2** | 软件四槽（SELECT+ABXY）+ Back 抑制 + 防卡键 | 四套 profile 零停顿切换；游戏收不到 `Back+A`；组合按住不放不重复切；`kill -9` 后无残留按键 |
 | **M3** | 映射引擎 + TOML + lint + 回放 | 任意按钮→任意目标；回放断言通过；CPU < 5% |
 | **M4** | 摇杆/体感→鼠标、扳机→滚轮、Home 开关、标定 | 桌面全局可移动/点击/滚动；360° 标定可复现 |
 | **M5** | FF_RUMBLE 透传 | 游戏震动正常；延迟 p99 < 5 ms；停止无残留 |
@@ -686,7 +686,7 @@ python3 -m venv .venv && .venv/bin/pip install evdev
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | 板载配置把 M1/M2 映射成键盘 | M1/M2 消失 | 启动审计 + 明确警告；不自动改 blob |
-| SELECT 组合被固件解释 | 切槽不生效或设备重枚举 | control probe 先验证；不行就换 `Back+Start` 长按菜单 |
+| ~~SELECT 组合被固件解释~~ | — | **已排除**：实测四组都不切槽、不重枚举，只上报 `back` + 字母 |
 | FF 字节语义不对 | 震动弱/单边/不震 | sweep 标定；保留模板可改 |
 | uinput 手柄不被 Steam 识别 | Steam 里没有手柄 | GUID 已对齐；必要时写 udev/uinput 属性或让用户加映射 |
 | X11 指针加速 | 体感手感不一致 | 关加速或用灵敏度抵消；游戏 raw input 不受影响 |
@@ -741,9 +741,73 @@ flydigi_direwolf_4_for_linux/
 
 ## 18. 下一步
 
-1. 跑 M0：`blob_audit` → `control_probe` → `uinput_ident_probe` → `ff_probe`。
-2. 根据结论改 `config/default.toml` 里的三个字节和槽位映射。
-3. 进入 M1：把 `scripts/flydigi_usb.py` / `flydigi_report.py` 提升为
-   `flydigi_daemon/` 包，写 `devices.py` + 透传循环。
-4. M1 通过后按 M2→M5 推进；体感标定放在 M4 开头。
-5. 每完成一个阶段更新 `docs/scripts.md` 和 README 的"当前状态"。
+> 2026-11-19 更新：M0 已完成。`control_probe` 确认 **SELECT+A/B/X/Y 是空键位**，
+> 软件四槽成立；FN+A/B/X/Y 属于固件，daemon 不碰。
+
+### M1：透明转发（当前阶段）
+
+目标：**先做到和 xpad 一样**，再加任何功能。M1 不改映射、不做体感、不做宏。
+
+任务：
+
+1. **建包**：`flydigi_daemon/`
+   - `usb.py` ← 由 `scripts/flydigi_usb.py` 提升（保留 `scripts/` 旧脚本可用的路径）
+   - `report.py` ← 由 `scripts/flydigi_report.py` 提升
+   - `devices.py`：三台 uinput（手柄 / 键盘 / 鼠标），沿用探针验证过的 capability
+   - `config.py`：`tomli` 读 `config/default.toml`，先只读 `[daemon]`
+   - `daemon.py`：claim → 1000 Hz 读流 → 写虚拟手柄 → SIGINT/SIGTERM 收尾
+   - `__main__.py`：`python3 -m flydigi_daemon run|check`
+2. **透传范围**：标准按钮字、LT/RT、左右摇杆、十字键、Home。
+   M1/M2/FN/Turbo 只记日志（它们不在标准字里，等 M3 再映射）。
+3. **收尾**：任何退出路径都 `release_all()` + `modprobe xpad`；`SIGKILL` 没法收尾，
+   所以启动时先做一次"残局清理"（若有旧虚拟设备/残留 xpad 状态）。
+4. **`check` 子命令**：只读识别设备、打印槽位/固件/当前板载槽审计结果，
+   不 claim、不发虚拟设备。
+
+M1 验收（硬件上跑一次即可）：
+
+```bash
+sudo python3 -m flydigi_daemon check          # 识别、槽位、审计
+sudo python3 -m flydigi_daemon run            # 另开终端：
+evtest /dev/input/eventN                      # 每个键/轴都对得上
+jstest /dev/input/jsN
+# Steam / RetroArch 能识别为 Xbox 360 手柄
+# Ctrl-C 后：xpad 自动回来，evtest 里没有卡住的键
+```
+
+### M2：软件四槽
+
+- 120 ms 仲裁窗口；`SELECT+ABXY` 吞掉 `back` 和字母，直到两键都松开
+- `slot_profiles = [a, b, c, d]` 按 SELECT 的字母选表；状态存 `state.json`
+- 切换时 `release_all()` → 换表 → 体感组复位 → 短震确认（震动在 M5 接上后生效）
+- 验收：按住 SELECT 连按 A/B 只切一次；`kill -9` 后重新启动无残留按键
+
+### M3：映射 DSL
+
+- 按钮/扳机/摇杆 → 手柄键、键盘键、鼠标键、滚轮
+- 宏（按下/松开序列、延时）、turbo（频率）、摇杆曲线、扳机行程
+- `config/default.toml` 已经是目标格式；先做 lint，再做回放测试
+- 验收：任意按钮映射到任意目标；`.bin` 回放断言通过
+
+### M4：体感与标定
+
+- yaw/pitch 积分 → 鼠标；死区、灵敏度、`+左摇杆` 相加
+- `flydigi-gyro-calibrate`：静止 3 s + 水平 360° + 俯仰 90°，写 `calibration.json`
+- Home 按下沿切换 `gyro` 组，短震反馈
+- 验收：桌面全局可移动/点击；360° 标定可复现
+
+### M5：震动透传
+
+- uinput `FF_RUMBLE` → 12 字节模板，50 Hz；strong/weak → 0..255
+- `--sweep` 标定 `[3]/[5]/[7]` 三字节语义，结果回填 `config/default.toml`
+- 验收：游戏震动正常；停止无残留；p99 < 5 ms
+
+### M6：服务化
+
+- systemd unit、udev 规则、安装/卸载脚本、非 root 运行（`input` 组 + uinput 权限）
+- 热插拔、`systemctl restart` 无卡键、拔插自动恢复
+- 验收：拔插 10 次不掉；重启服务不粘键
+
+### M7：收尾
+
+- README「当前状态」、`docs/scripts.md`、回归脚本、CI 回放
