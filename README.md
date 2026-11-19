@@ -1,4 +1,4 @@
-# flydigi-dw4-linux
+# flydigi_direwolf_4_for_linux
 
 飞智冰原狼4 (Direwolf 4) 在 Linux 下的体感/按键映射/配置切换支持项目。
 openflydigi 的分支延续：上游明确不支持老协议手柄（`045e:028e`，无 HID vendor

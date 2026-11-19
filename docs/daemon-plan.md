@@ -662,7 +662,7 @@ python3 -m venv .venv && .venv/bin/pip install evdev
 ## 17. 目录规划
 
 ```
-flydigi-dw4-linux/
+flydigi_direwolf_4_for_linux/
 ├── config/
 │   ├── default.toml              # 本方案的配置样例
 │   └── calibration.example.json  # 标定文件结构

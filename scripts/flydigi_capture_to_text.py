@@ -24,7 +24,7 @@ import sys
 OUT_DIR = 'data/txt'
 MANIFEST = 'data/MANIFEST.md'
 
-HEADER = """# flydigi-dw4-linux 报文文本
+HEADER = """# flydigi_direwolf_4_for_linux 报文文本
 # 来源: {src}  大小: {size} 字节  sha256: {sha}
 # 帧数: {n}  时长: {dur:.3f}s  报文长度: {rlen}
 # 列: t_ms,btn,lt,rt,lx,ly,rx,ry,keys,raw14,raw15,raw16,raw21,raw22,raw23,raw24
@@ -112,7 +112,7 @@ def convert_phased(path, out_path):
 
 def convert_blob(path, out_path):
     blob = open(path, 'rb').read()
-    lines = [f'# flydigi-dw4-linux 配置 blob',
+    lines = [f'# flydigi_direwolf_4_for_linux 配置 blob',
              f'# 来源: {os.path.basename(path)}  大小: {len(blob)} 字节'
              f'  sha256: {sha(path)}',
              '# 布局见 docs/findings-profile-blob.md']
