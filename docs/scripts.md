@@ -264,8 +264,10 @@ sudo python3 scripts/flydigi_control_probe.py
 sudo python3 scripts/flydigi_control_probe.py --phases select_tap,home_short,home_long,fn,turbo,m1,m2
 ```
 
-**实测结论**（2026-11-19）：`SELECT + A/B/X/Y` **是固件的切槽键**
-（A→槽0、B→槽1），切槽时输入流停 0.7–1.0 秒，设备路径不变。
+**实测结论**（2026-11-19）：固件切槽键是 **FN + A/B/X/Y**（A→槽0、B→槽1），
+切槽时输入流停 0.7–1.0 秒，设备路径不变。
+`SELECT + A/B/X/Y` 是否被固件占用**仍待验证**——探针的 `select_*` 阶段就是测这个，
+每个阶段会打印"实际检测到的修饰键"（SELECT=back / FN=menu），按错会直接指出。
 详见 [docs/findings-slot-audit.md](findings-slot-audit.md) §7。
 
 ### `flydigi_uinput_ident_probe.py` — 虚拟设备识别 ⭐

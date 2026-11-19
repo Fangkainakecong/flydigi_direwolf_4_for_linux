@@ -41,20 +41,24 @@ sys.dont_write_bytecode = True          # 见 blob_audit：别让 root 写 __pyc
 import flydigi_report as rep
 from flydigi_usb import Link, Pad, find_pad, identify
 
-# 顺序很重要：SELECT+A/B/X/Y 实测会切**板载槽**（见 findings-slot-audit.md），
-# 切完槽之后板载配置变了，后面的按键测试就测不准了。所以四个组合键放最后。
+# 前提：**SELECT 和 FN 是两颗不同的键**。
+#   SELECT = 左边的 Back / 视图键，单独按只报 `back`
+#   FN     = 另一颗，单独按时位图会出现 `menu`（bit 24）
+# 探针会在每个阶段回报"实际检测到的修饰键"，按错了会直接指出来。
+#
+# FN+A/B/X/Y 是固件自己的切槽，不要用；SELECT+A/B/X/Y 是否被固件占用正是要测的。
 PHASES = [
-    ('select_tap', '只按一次 SELECT（Back）'),
+    ('select_tap', '只按一次 SELECT（左边 Back/视图键，不是 FN）'),
+    ('fn', '只按一次 FN（不是 SELECT；按对了位图会出现 menu）'),
     ('home_short', '短按一次 Home（Logo）'),
     ('home_long', '按住 Home 约 1 秒再松开'),
-    ('fn', '按一次 FN（SELECT 右边那颗）'),
     ('turbo', '按一次 Turbo'),
     ('m1', '按一次 M1（背面左）'),
     ('m2', '按一次 M2（背面右）'),
-    ('select_a', '按住 SELECT，再按 A，然后都松开'),
-    ('select_b', '按住 SELECT，再按 B，然后都松开'),
-    ('select_x', '按住 SELECT，再按 X，然后都松开'),
-    ('select_y', '按住 SELECT，再按 Y，然后都松开'),
+    ('select_a', '按住 SELECT（Back/视图键），再按 A，然后都松开'),
+    ('select_b', '按住 SELECT（Back/视图键），再按 B，然后都松开'),
+    ('select_x', '按住 SELECT（Back/视图键），再按 X，然后都松开'),
+    ('select_y', '按住 SELECT（Back/视图键），再按 Y，然后都松开'),
 ]
 
 
@@ -154,7 +158,22 @@ def summarize(events):
         'max_std_combo': sorted(max_std),
         'max_bit_combo': sorted(max_bits),
         'n_events': len(events),
+        'saw_back': 'back' in pressed,
+        'saw_menu': 'menu' in pressed,
     }
+
+
+def modifier_used(summary):
+    """判断这一轮按的是 SELECT 还是 FN。
+
+    SELECT 单独按 → 标准字/位图都是 `back`。
+    FN 单独按（以及 FN 组合）→ 位图出现 `menu`（bit 24），标准字里没有 back。
+    """
+    if summary.get('saw_menu'):
+        return 'FN（位图 menu 位）'
+    if summary.get('saw_back'):
+        return 'SELECT（back）'
+    return '没检测到修饰键'
 
 
 def safe_identify(link, tries=10, delay=0.25):
@@ -285,6 +304,7 @@ def main():
                       % (' '.join(summary['max_bit_combo']) or '无',
                          slot_before, slot_after,
                          '  (变了!)' if item['slot_changed'] else ''))
+                print('      修饰键: %s' % modifier_used(summary))
                 if gap_before > 0.5:
                     print('      ⚠ 报文中断 %.1fs%s' % (
                         gap_before,
