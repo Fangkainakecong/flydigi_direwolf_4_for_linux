@@ -1,3 +1,5 @@
 captures/
 __pycache__/
 *.pyc
+config/calibration.json
+state.json

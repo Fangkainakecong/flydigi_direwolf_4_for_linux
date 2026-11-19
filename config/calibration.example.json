@@ -1,0 +1,31 @@
+{
+  "device": "045e:028e",
+  "firmware": "4.0.7.2",
+  "measured_at": "YYYY-MM-DDTHH:MM:SS",
+  "gyro": {
+    "update_rate_hz": 89.0,
+    "counts_per_degree": {
+      "yaw": 12.5,
+      "pitch": 11.8
+    },
+    "invert": {
+      "yaw": false,
+      "pitch": false
+    },
+    "noise_counts": {
+      "yaw": 1.2,
+      "pitch": 1.1
+    },
+    "drift_counts_per_s": {
+      "yaw": 0.4,
+      "pitch": 0.3
+    }
+  },
+  "stick": {
+    "lx": {"min": -32768, "max": 32767, "center": 0},
+    "ly": {"min": -32768, "max": 32767, "center": 0},
+    "rx": {"min": -32768, "max": 32767, "center": 0},
+    "ry": {"min": -32768, "max": 32767, "center": 0}
+  },
+  "note": "由 scripts/flydigi_gyro_calibrate.py 生成；M4 之前可以只用 example 里的结构"
+}

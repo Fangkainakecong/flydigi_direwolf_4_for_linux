@@ -1,0 +1,212 @@
+# 飞智冰原狼4 Linux daemon 配置（样例，可直接改）
+#
+# 语法：TOML。所有键名用 Linux evdev 名称（`evtest` / `input-event-codes.h`）。
+# 改完保存即可热加载，不用重启 daemon。
+#
+# 目标写法：
+#   xbox:lb / xbox:abs_x        进虚拟 Xbox 手柄
+#   key:space / key:ctrl+shift+esc
+#   mouse:left / mouse:right / mouse:middle
+#   mouse:x / mouse:y           相对移动（只能用在 axis 上）
+#   wheel:up / wheel:down
+#   toggle:gyro                 切换某个组
+#   keypair                     轴的两个方向各映射一个按键目标（只能用在 axis 上）
+#   none                        吞掉
+version = 1
+
+[daemon]
+# SELECT+A/B/X/Y 对应的四套配置。顺序 = 槽位 1/2/3/4。
+slot_profiles = ["gamepad", "desktop", "media", "passthrough"]
+startup_profile = "gamepad"
+# 组合键修饰键：`back` = SELECT。改成 `fn` 就会用 FN，但 FN 组合被固件占用，不推荐。
+chord_button = "back"
+# SELECT 单独按住超过这个时间就当作普通按键，避免每次切配置都延迟 Back。
+chord_window_ms = 120
+# 切配置时把组合键从输出里吞掉，游戏不会收到 Back+A。
+suppress_chord = true
+
+[device]
+vendor = 0x045e
+product = 0x028e
+interface = 0
+
+[virtual.keyboard]
+name = "Flydigi DW4 Virtual Keyboard"
+vendor = 0x1234
+product = 0x5678
+
+[virtual.mouse]
+name = "Flydigi DW4 Virtual Mouse"
+vendor = 0x1234
+product = 0x5679
+
+[virtual.gamepad]
+# 照抄 xpad 的身份，Steam/SDL 会命中内置的 Xbox 360 映射。
+name = "Microsoft X-Box 360 pad"
+vendor = 0x045e
+product = 0x028e
+version = 0x0114
+
+[rumble]
+enabled = true
+# 实测可用包；strong_byte/weak_byte 由 flydigi_ff_probe.py --sweep 确认后改这里。
+template = "00 01 0f c0 00 ff 00 ff 00 00 00 00"
+strong_byte = 3
+weak_byte = 5
+enable_byte = 7
+rate_hz = 50
+
+[calibration]
+# 由 flydigi_gyro_calibrate.py 生成（含 counts_per_degree / noise / update_rate）。
+file = "config/calibration.json"
+
+[safety]
+release_on_profile_switch = true
+release_all_on_exit = true
+# 超过这个时间没有报文就重置 URB；连续失败则退出交给 systemd 重启。
+watchdog_ms = 1500
+# 手柄上的紧急停止：同时按住 Back+Start 1.5 秒，所有注入停止，直到重启 daemon。
+panic_chord = "back+start"
+panic_hold_ms = 1500
+
+[feedback]
+# 切配置/开体感时的提示震动：none / short / double
+profile_switch = "short"
+gyro_on = "short"
+gyro_off = "double"
+
+# ---------------------------------------------------------------------------
+# 配置 A：标准 Xbox 手柄
+# 标准输入全部原样转发；M1/M2 是标准字里没有的，必须显式给目标。
+# ---------------------------------------------------------------------------
+[profile.gamepad]
+passthrough = true
+m1 = "xbox:lb"
+m2 = "xbox:rb"
+fn = "none"          # FN 留给固件（Windows 空间站）
+turbo = "none"
+
+# ---------------------------------------------------------------------------
+# 配置 B：桌面键鼠
+# 左摇杆 + 体感 → 鼠标；LT/RT → 滚轮；LB/RB → 左右键。
+# ---------------------------------------------------------------------------
+[profile.desktop]
+a = "key:space"
+b = "key:escape"
+x = "key:enter"
+y = "key:backspace"
+start = "key:leftalt"
+back = "key:tab"
+lb = "mouse:left"
+rb = "mouse:right"
+dpad_up = "key:pageup"
+dpad_down = "key:pagedown"
+dpad_left = "key:leftshift"
+dpad_right = "key:leftctrl"
+m1 = "key:minus"
+m2 = "key:shift+equal"     # 输出 `+`；也可以改 key:kp_plus
+turbo = "none"
+fn = "none"
+home = "toggle:gyro"       # Home：开/关体感，再按一次关闭
+
+[profile.desktop.groups]
+gyro = false               # 进入桌面配置时体感默认关闭，防止误漂移
+
+[profile.desktop.axis.lx]
+target = "mouse:x"
+deadzone = 0.12
+curve = 2.0
+max_speed = 1200           # 像素/秒（满推）
+
+[profile.desktop.axis.ly]
+target = "mouse:y"
+invert = true              # 报文里 Y 向上为正，鼠标 REL_Y 向下为正
+deadzone = 0.12
+curve = 2.0
+max_speed = 1200
+
+[profile.desktop.axis.gyro_x]
+target = "mouse:x"
+group = "gyro"
+sensitivity = 1.0          # 像素/度，按手感调
+smoothing = 0.35           # 0=不滤波，越大越稳但越拖
+deadband = 1.5             # 小于这个 raw 值视为噪声
+
+[profile.desktop.axis.gyro_y]
+target = "mouse:y"
+group = "gyro"
+sensitivity = 0.8
+smoothing = 0.35
+deadband = 1.5
+invert = false             # 标定后如果上下反了改成 true
+
+[profile.desktop.axis.lt]
+target = "wheel:up"
+threshold = 0.35
+release_threshold = 0.25   # 迟滞，防止在阈值附近抖动
+repeat_hz = 18
+
+[profile.desktop.axis.rt]
+target = "wheel:down"
+threshold = 0.35
+release_threshold = 0.25
+repeat_hz = 18
+
+# 右摇杆 → WASD（可选，默认注释）
+# [profile.desktop.axis.rx]
+# target = "keypair"
+# neg = "key:a"
+# pos = "key:d"
+# deadzone = 0.35
+#
+# [profile.desktop.axis.ry]
+# target = "keypair"
+# neg = "key:s"
+# pos = "key:w"
+# deadzone = 0.35
+
+# ---------------------------------------------------------------------------
+# 配置 C：媒体控制
+# ---------------------------------------------------------------------------
+[profile.media]
+a = "key:playpause"
+b = "key:nextsong"
+x = "key:previoussong"
+y = "key:mute"
+lb = "key:volumedown"
+rb = "key:volumeup"
+start = "key:leftmeta"
+back = "key:tab"
+dpad_left = "key:left"
+dpad_right = "key:right"
+dpad_up = "key:up"
+dpad_down = "key:down"
+m1 = "key:minus"
+m2 = "key:shift+equal"
+fn = "none"
+turbo = "none"
+home = "none"
+
+[profile.media.axis.lx]
+target = "keypair"
+neg = "key:left"
+pos = "key:right"
+deadzone = 0.4
+
+[profile.media.axis.ly]
+target = "keypair"
+neg = "key:down"
+pos = "key:up"
+deadzone = 0.4
+
+# ---------------------------------------------------------------------------
+# 配置 D：纯透传（体感关闭、M1/M2 当 L3/R3）
+# 用来确认"没有软件映射时手柄本身是否正常"。
+# ---------------------------------------------------------------------------
+[profile.passthrough]
+passthrough = true
+m1 = "xbox:l3"
+m2 = "xbox:r3"
+fn = "none"
+turbo = "none"
+home = "xbox:guide"

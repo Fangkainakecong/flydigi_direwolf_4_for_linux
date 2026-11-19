@@ -201,3 +201,106 @@ python3 scripts/flydigi_stick_monitor.py /dev/input/event6
 5. xpad 驱动需先卸载才能 usbfs 独占接口；脚本用 `modprobe -r xpad` /
    `modprobe xpad` 包裹（`USBDEVFS_DISCONNECT` ioctl 不可靠）
 6. 手柄"断开"提示来自 Steam（evdev 节点随 xpad 卸载消失），2.4G 链路本身不受影响
+
+---
+
+## 守护进程 M0 探针（2026-11-19 新增）
+
+配套方案：[docs/daemon-plan.md](daemon-plan.md)
+配置样例：[config/default.toml](../config/default.toml)
+
+### `flydigi_usb.py` — 共用传输层（模块，不单独跑）
+
+把已验证的 usbfs 异步 URB、老方言帧、cmd16/80/33 收成一个模块，供新脚本和
+以后的 daemon 复用。要点：
+
+* `Pad.takeover()`：`USBDEVFS_DISCONNECT` → claim；claim 仍 EBUSY 时自动
+  退回 `modprobe -r xpad`（实测 DISCONNECT 有时返回 0 但驱动没放手）
+* `Link` 持续保持 8 个 IN URB 在途，收发命令时也不会把输入管道憋死
+* `read_slot()` 按索引拼 84 个 10 字节小包，容忍乱序/重复
+
+### `flydigi_report.py` — 32 字节报文解码（模块）
+
+纯函数：`decode()` / `std_buttons()` / `is_reply()` / `reply()` / `norm_axis()`。
+用历史抓包复核过（242538 帧，按钮/扳机/体感全部对得上）。
+
+### `flydigi_blob_audit.py` — 四槽配置审计 ⭐
+
+**作用**: 读 4 个槽位的 840 字节 blob，判断哪些是"干净默认"。
+daemon 启动前必须确认当前槽没有把 M1/M2 映射成键盘（目标 254），
+否则固件根本不会报这两个键。
+
+**判定**: 键位表全 `255` 且体感 target=0 → `clean`；出现 `254` → 警告死键；
+出现宏/Turbo/板载体感 → 列出但不阻止。
+
+**产物**: `data/txt/blob_audit_<时间戳>.json`（文本，进仓库）
+
+```bash
+sudo python3 scripts/flydigi_blob_audit.py
+```
+
+### `flydigi_control_probe.py` — SELECT 组合 / Home / FN / M1 / M2 ⭐
+
+**作用**: 实测 `SELECT + A/B/X/Y` 会不会切槽、组合键会不会漏进标准按钮字、
+Home 短按/长按的行为。这决定 daemon 是不是要自己实现软件四槽。
+
+**交互**: 每项一行提示，按 Enter 开始采 6 秒，自动进入下一项；
+实时状态只占一行，不刷屏。
+
+**产物**: `captures/control_<时间戳>.bin/.json`（bin 是标准 `<double><uint32>` 记录格式）
+
+```bash
+pkill -TERM steam
+sudo python3 scripts/flydigi_control_probe.py
+```
+
+### `flydigi_uinput_ident_probe.py` — 虚拟设备识别 ⭐
+
+**作用**: 用和 daemon 相同的 capability 建三台虚拟设备（Xbox 手柄 / 键盘 / 鼠标），
+打印节点、名称、SDL GUID，并保持一段时间供 `evtest` / `xinput` / Steam 验证。
+
+**已验证**（2026-11-19，本机）：
+
+* 三台设备都能创建，节点在 `/dev/input/eventN`
+* 手柄 GUID = `030000005e0400008e02000014010000`（与 SDL 内置 Xbox 360 一致）
+* 11 个按钮 + 8 个轴 + `FF_RUMBLE` 被内核接受
+* `--emit-test` 能发 A/摇杆/Shift+A/鼠标移动
+
+```bash
+python3 scripts/flydigi_uinput_ident_probe.py --wait 60
+python3 scripts/flydigi_uinput_ident_probe.py --emit-test
+python3 scripts/flydigi_uinput_ident_probe.py --dry-run
+```
+
+需要 `python3-evdev`（`sudo apt install python3-evdev`）。
+
+### `flydigi_ff_probe.py` — 震动 FF 透传 ⭐
+
+**作用**: 建虚拟手柄，接收游戏的 FF 上传/播放，把强弱力度翻译成厂商
+rumble 包；`--sweep` 扫描报文里 `[3]/[5]/[7]` 的含义。
+
+**已验证**（2026-11-19，本机无手柄）：
+
+* FF 上传/播放/停止全链路通，强度 0–65535 → 0–255 正确
+* 客户端 → daemon 延迟 **0.18–0.30 ms**
+* 关键坑：`EV_UINPUT` 在 `UInput.fd`（不是 evdev 节点）；客户端
+  `upload_effect()` 阻塞期间不释放 GIL，测试时必须放子进程
+
+```bash
+sudo python3 scripts/flydigi_ff_probe.py --fftest     # 配合 sudo fftest
+sudo python3 scripts/flydigi_ff_probe.py --pad        # 自动播四档
+sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
+```
+
+## 推荐执行顺序
+
+```bash
+pkill -TERM steam
+sudo python3 scripts/flydigi_blob_audit.py
+sudo python3 scripts/flydigi_control_probe.py
+python3 scripts/flydigi_uinput_ident_probe.py --wait 60
+sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
+```
+
+跑完把 `data/txt/blob_audit_*.json` 加进 `data/MANIFEST.md`，
+`captures/control_*.bin` 用 `flydigi_capture_to_text.py` 转成文本存档。
