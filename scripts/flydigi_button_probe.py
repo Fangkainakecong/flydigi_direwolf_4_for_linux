@@ -634,7 +634,6 @@ def main():
     print(f"手柄: {dev}")
 
     if subprocess.run(['pgrep', '-x', 'steam'], capture_output=True).stdout.strip():
-        print("\n⚠ Steam 在运行，它会抢设备。建议先 pkill -TERM steam。")
         input("  回车继续，Ctrl-C 退出 > ")
 
     todo = []      # ('key', id) / ('circle', 'ls'/'rs') / ('axis', id)

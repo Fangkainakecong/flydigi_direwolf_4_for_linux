@@ -23,7 +23,6 @@ daemon 自己实现软件四槽（推荐）；如果固件认，daemon 只跟着
 
 用法
 ----
-    pkill -TERM steam
     sudo python3 scripts/flydigi_control_probe.py
     sudo python3 scripts/flydigi_control_probe.py --seconds 8
     sudo python3 scripts/flydigi_control_probe.py --free    # 自由记录 60 秒
@@ -168,7 +167,6 @@ def main():
         sys.exit('未找到手柄 (045e:028e)')
 
     print('手柄: %s' % dev)
-    print('先关掉 Steam（它可能抢设备）：pkill -TERM steam')
     print('全程保持手柄亮灯。每个项目 6 秒，Ctrl-C 随时退出。\n')
 
     os.makedirs(args.out, exist_ok=True)

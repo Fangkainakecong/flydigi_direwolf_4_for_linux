@@ -527,12 +527,14 @@ X11（当前 XFCE）下鼠标指针会经过指针加速：
 ### 11.4 跑的顺序
 
 ```
-0) pkill -TERM steam
 1) sudo python3 scripts/flydigi_blob_audit.py        # 先确认槽位干净
 2) sudo python3 scripts/flydigi_control_probe.py     # 再确认组合键行为
 3) python3 scripts/flydigi_uinput_ident_probe.py --wait 60
 4) sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
 5) （可选）sudo python3 scripts/flydigi_dinput_probe.py   # 切 DInput 后
+
+USB 层独占是用 `USBDEVFS_DISCONNECT` 解绑内核驱动完成的，Steam 拦不住，
+所以**不需要先关 Steam**（早期脚本有这条提示，已移除）。
 ```
 
 ---

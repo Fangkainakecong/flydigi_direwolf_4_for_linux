@@ -21,7 +21,6 @@
 
 **用法**:
 ```bash
-pkill -TERM steam
 sudo python3 scripts/flydigi_button_probe.py --note "Windows 全默认键位"
 sudo python3 scripts/flydigi_button_probe.py --no-keys        # 只测两个摇杆
 sudo python3 scripts/flydigi_button_probe.py --only m1,m2
@@ -250,7 +249,6 @@ Home 短按/长按的行为。这决定 daemon 是不是要自己实现软件四
 **产物**: `captures/control_<时间戳>.bin/.json`（bin 是标准 `<double><uint32>` 记录格式）
 
 ```bash
-pkill -TERM steam
 sudo python3 scripts/flydigi_control_probe.py
 ```
 
@@ -295,7 +293,6 @@ sudo python3 scripts/flydigi_ff_probe.py --pad --sweep
 ## 推荐执行顺序
 
 ```bash
-pkill -TERM steam
 sudo python3 scripts/flydigi_blob_audit.py
 sudo python3 scripts/flydigi_control_probe.py
 python3 scripts/flydigi_uinput_ident_probe.py --wait 60
