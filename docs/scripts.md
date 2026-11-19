@@ -1,6 +1,6 @@
 # 飞智冰原狼4 (Direwolf 4) 实验脚本
 
-> 配套方案文档: [docs/plan.md](../docs/flydigi-dw4-2.4g-gyro-plan.md)
+> 配套方案文档: [docs/daemon-plan.md](daemon-plan.md)（新）与 [docs/plan.md](plan.md)（早期草案）
 > 全部脚本需 sudo 运行（直接操作 USB 设备），运行结束自动恢复 xpad 驱动
 > 日期: 2026-11-18
 
