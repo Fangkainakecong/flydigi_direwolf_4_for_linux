@@ -1,0 +1,675 @@
+"""映射 DSL：物理输入 → 手柄 / 键盘 / 鼠标 / 滚轮 / 组开关（M3）
+
+配置格式见 `config/default.toml` 和 `docs/daemon-plan.md` §4。这一层只做
+"当前 profile + 原始 PadState → 本帧该输出什么"，不碰 USB；uinput 写入由
+`devices.py` 完成，方便回放和单元测试。
+
+设计要点：
+
+* 每帧从零计算**期望状态**（手柄键集合、键盘键集合、鼠标键集合），再和
+  上一帧做差量。多个物理键映射到同一目标时天然去重，不需要引用计数。
+* 键盘组合键拆成键集合；按下时先修饰键、后普通键，松开时反序。
+* 轴映射（`mouse:x` / `keypair` / `wheel:up` / 阈值按键）在 `axis.NAME` 下。
+* `passthrough = true` 时标准手柄输入原样走；显式条目覆盖对应输入。
+* 组（`group = "gyro"`）关闭时，该条目按"松开/归零"处理。
+* 摇杆 Y 轴在引擎里统一成 **XInput 语义：向上为正**，与配置里的 `invert`
+  注释一致；写回手柄时再转成 evdev 的 `~value`。
+"""
+
+import time
+from dataclasses import dataclass, field, replace
+
+from evdev import ecodes
+
+from .translate import EMPTY, PadState, invert16
+
+# ---------------------------------------------------------------------------
+# 名字表
+# ---------------------------------------------------------------------------
+SOURCE_ALIASES = {
+    'dpad_up': 'up', 'dpad_down': 'down', 'dpad_left': 'left',
+    'dpad_right': 'right', 'guide': 'home', 'select': 'back',
+}
+SOURCES = {
+    'a', 'b', 'x', 'y', 'lb', 'rb', 'back', 'start', 'home',
+    'l3', 'r3', 'up', 'down', 'left', 'right',
+    'm1', 'm2', 'fn', 'turbo',
+}
+PAD_BUTTONS = {'a', 'b', 'x', 'y', 'lb', 'rb', 'back', 'start',
+               'home', 'l3', 'r3'}
+PAD_ALIASES = {'guide': 'home', 'select': 'back'}
+PAD_AXIS_INDEX = {
+    'abs_x': ('axes', 0), 'abs_y': ('axes', 1),
+    'abs_rx': ('axes', 2), 'abs_ry': ('axes', 3),
+    'abs_z': ('triggers', 0), 'abs_rz': ('triggers', 1),
+}
+AXIS_NAMES = {'lx', 'ly', 'rx', 'ry', 'lt', 'rt', 'gyro_x', 'gyro_y', 'gyro_z'}
+MOUSE_BUTTONS = {'left': ecodes.BTN_LEFT, 'right': ecodes.BTN_RIGHT,
+                 'middle': ecodes.BTN_MIDDLE, 'side': ecodes.BTN_SIDE,
+                 'extra': ecodes.BTN_EXTRA}
+
+KEY_ALIASES = {
+    'escape': 'esc', 'return': 'enter', 'del': 'delete',
+    'ctrl': 'leftctrl', 'shift': 'leftshift', 'alt': 'leftalt',
+    'win': 'leftmeta', 'super': 'leftmeta', 'meta': 'leftmeta',
+    'pgup': 'pageup', 'pgdn': 'pagedown', 'kp_plus': 'kpplus',
+    'kp_minus': 'kpminus', 'plus': 'equal',
+}
+MODIFIER_CODES = {
+    ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL,
+    ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT,
+    ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT,
+    ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA,
+}
+
+_KEY_CODES = {}
+for _name, _code in ecodes.ecodes.items():
+    if _name.startswith('KEY_'):
+        _KEY_CODES[_name[4:].lower()] = _code
+
+
+class ConfigError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# 目标
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Target:
+    kind: str                 # none/pad/key/mouse_button/mouse_move/wheel/toggle
+    value: object = None
+
+
+NONE = Target('none')
+
+
+def _split_combo(text):
+    parts = [p.strip().lower() for p in str(text).split('+') if p.strip()]
+    if not parts:
+        raise ConfigError('空的按键组合：%r' % (text,))
+    codes = []
+    seen = set()
+    for part in parts:
+        name = KEY_ALIASES.get(part, part)
+        code = _KEY_CODES.get(name)
+        if code is None:
+            raise ConfigError('未知按键名 %r（key:%s）' % (part, text))
+        if code in seen:
+            raise ConfigError('组合键里重复的修饰键：%r' % (text,))
+        seen.add(code)
+        codes.append(code)
+    return tuple(codes)
+
+
+def parse_button_target(text):
+    text = str(text).strip()
+    low = text.lower()
+    if low == 'none':
+        return NONE
+    if low.startswith('xbox:'):
+        name = low[5:]
+        name = PAD_ALIASES.get(name, name)
+        if name in PAD_BUTTONS:
+            return Target('pad', name)
+        raise ConfigError('未知手柄按钮 %r（可用：%s）'
+                          % (name, ', '.join(sorted(PAD_BUTTONS))))
+    if low.startswith('key:'):
+        return Target('key', _split_combo(text[4:]))
+    if low.startswith('mouse:'):
+        name = low[6:]
+        if name in MOUSE_BUTTONS:
+            return Target('mouse_button', MOUSE_BUTTONS[name])
+        raise ConfigError('未知鼠标键 %r（可用：%s）'
+                          % (name, ', '.join(sorted(MOUSE_BUTTONS))))
+    if low.startswith('wheel:'):
+        name = low[6:]
+        if name in ('up', 'down'):
+            return Target('wheel', 1 if name == 'up' else -1)
+        raise ConfigError('未知滚轮方向 %r（只能用 up/down）' % (name,))
+    if low.startswith('toggle:'):
+        name = low[7:]
+        if not name:
+            raise ConfigError('toggle 缺少组名')
+        return Target('toggle', name)
+    raise ConfigError('未知目标 %r' % (text,))
+
+
+def parse_axis_target(text):
+    text = str(text).strip()
+    low = text.lower()
+    if low.startswith('mouse:'):
+        name = low[6:]
+        if name in ('x', 'y'):
+            return Target('mouse_move', name)
+        # mouse:left/right/... 作为阈值按钮目标，继续走 parse_button_target
+    if low == 'keypair':
+        return Target('keypair')
+    if low.startswith('xbox:'):
+        name = low[5:]
+        if name in PAD_AXIS_INDEX:
+            return Target('pad_axis', name)
+        raise ConfigError('轴目标 %r 无效；手柄轴请用 abs_x/abs_y/abs_rx/'
+                          'abs_ry/abs_z/abs_rz' % (text,))
+    try:
+        target = parse_button_target(text)
+    except ConfigError:
+        raise
+    if target.kind in ('pad', 'key', 'mouse_button', 'wheel', 'none'):
+        return target
+    raise ConfigError('轴目标 %r 不能用在 axis 下' % (text,))
+
+
+# ---------------------------------------------------------------------------
+# profile
+# ---------------------------------------------------------------------------
+@dataclass
+class AxisRule:
+    axis: str
+    target: Target
+    group: str = None
+    deadzone: float = 0.12
+    curve: float = 1.0
+    invert: bool = False
+    max_speed: float = 800.0
+    threshold: float = 0.35
+    release_threshold: float = 0.25
+    repeat_hz: float = 0.0
+    neg: Target = None
+    pos: Target = None
+
+
+@dataclass
+class ButtonRule:
+    source: str
+    target: Target
+    group: str = None
+
+
+@dataclass
+class Profile:
+    name: str
+    passthrough: bool = False
+    buttons: dict = field(default_factory=dict)
+    axes: dict = field(default_factory=dict)
+    groups: dict = field(default_factory=dict)
+
+
+def _norm_source(name):
+    name = str(name).strip().lower()
+    name = SOURCE_ALIASES.get(name, name)
+    if name not in SOURCES:
+        raise ConfigError('未知物理键 %r（可用：%s）'
+                          % (name, ', '.join(sorted(SOURCES))))
+    return name
+
+
+def _check_axis_name(name):
+    name = str(name).strip().lower()
+    if name not in AXIS_NAMES:
+        raise ConfigError('未知轴 %r（可用：%s）'
+                          % (name, ', '.join(sorted(AXIS_NAMES))))
+    return name
+
+
+def parse_axis_rule(name, data):
+    if not isinstance(data, dict):
+        raise ConfigError('[axis.%s] 必须是表' % (name,))
+    if 'target' not in data:
+        raise ConfigError('[axis.%s] 缺少 target' % (name,))
+    target = parse_axis_target(data['target'])
+    rule = AxisRule(axis=name, target=target,
+                    group=data.get('group'),
+                    invert=bool(data.get('invert', False)))
+    if 'deadzone' in data:
+        rule.deadzone = float(data['deadzone'])
+    if 'curve' in data:
+        rule.curve = float(data['curve'])
+    if 'max_speed' in data:
+        rule.max_speed = float(data['max_speed'])
+    if 'threshold' in data:
+        rule.threshold = float(data['threshold'])
+    if 'release_threshold' in data:
+        rule.release_threshold = float(data['release_threshold'])
+    if 'repeat_hz' in data:
+        rule.repeat_hz = float(data['repeat_hz'])
+
+    if target.kind == 'keypair':
+        for side in ('neg', 'pos'):
+            if side not in data:
+                raise ConfigError('[axis.%s] keypair 缺少 %s' % (name, side))
+            sub = parse_button_target(data[side])
+            if sub.kind not in ('pad', 'key', 'mouse_button', 'wheel'):
+                raise ConfigError('[axis.%s] %s 的目标 %r 不能用在 keypair'
+                                  % (name, side, data[side]))
+            setattr(rule, side, sub)
+        if 'deadzone' not in data:
+            rule.deadzone = 0.35
+        rule.release_threshold = rule.deadzone
+    elif target.kind == 'mouse_move':
+        if name not in ('lx', 'ly', 'rx', 'ry', 'gyro_x', 'gyro_y'):
+            raise ConfigError('[axis.%s] 不能映射到 mouse:%s'
+                              % (name, target.value))
+    elif target.kind == 'wheel':
+        if 'threshold' not in data:
+            rule.threshold = 0.35
+        if rule.release_threshold >= rule.threshold:
+            rule.release_threshold = max(0.0, rule.threshold - 0.1)
+        if rule.repeat_hz <= 0 and name in ('lt', 'rt'):
+            rule.repeat_hz = 18.0
+    return rule
+
+
+def parse_profile(name, data):
+    if not isinstance(data, dict):
+        raise ConfigError('[profile.%s] 必须是表' % (name,))
+    profile = Profile(name=name,
+                      passthrough=bool(data.get('passthrough', False)))
+    if 'groups' in data:
+        groups = data['groups']
+        if not isinstance(groups, dict):
+            raise ConfigError('[profile.%s.groups] 必须是表' % (name,))
+        profile.groups = {str(k): bool(v) for k, v in groups.items()}
+
+    for key, value in data.items():
+        if key in ('passthrough', 'groups'):
+            continue
+        if key == 'axis':
+            if not isinstance(value, dict):
+                raise ConfigError('[profile.%s.axis] 必须是表' % (name,))
+            for axis_name, axis_data in value.items():
+                axis = _check_axis_name(axis_name)
+                profile.axes[axis] = parse_axis_rule(axis, axis_data)
+            continue
+        source = _norm_source(key)
+        target = parse_button_target(value)
+        group = None
+        if isinstance(value, dict):
+            # 预留：以后允许按钮写成 {target=..., group=...}
+            target = parse_button_target(value.get('target', 'none'))
+            group = value.get('group')
+        if source in profile.buttons:
+            raise ConfigError('[profile.%s] 物理键 %r 重复' % (name, source))
+        profile.buttons[source] = ButtonRule(source, target, group)
+    return profile
+
+
+def parse_config(cfg):
+    """解析所有 `[profile.*]`，返回 {名字: Profile}。"""
+    raw = cfg.get('profile', {})
+    if not isinstance(raw, dict) or not raw:
+        raise ConfigError('配置里没有任何 [profile.*]')
+    profiles = {}
+    for name, data in raw.items():
+        profiles[name] = parse_profile(name, data)
+    return profiles
+
+
+def lint_config(cfg):
+    """返回 (errors, warnings)，给 `check` 和启动前使用。"""
+    errors, warnings = [], []
+    names = cfg.get('daemon', {}).get('slot_profiles', [])
+    if len(names) != 4:
+        errors.append('daemon.slot_profiles 必须正好 4 项，当前 %d 项'
+                      % len(names))
+    profiles = cfg.get('profile', {})
+    for name in names:
+        if name not in profiles:
+            errors.append('daemon.slot_profiles 引用了不存在的 profile %r'
+                          % (name,))
+    for name, data in profiles.items():
+        try:
+            profile = parse_profile(name, data)
+        except ConfigError as exc:
+            errors.append(str(exc))
+            continue
+        for rule in profile.axes.values():
+            if rule.axis.startswith('gyro'):
+                warnings.append('[profile.%s.axis.%s] 体感轴要等 M4 标定后生效'
+                                % (name, rule.axis))
+            if rule.target.kind in ('key', 'mouse_button', 'wheel') and \
+                    not (0 < rule.threshold < 1):
+                errors.append('[profile.%s.axis.%s] threshold 必须在 0..1'
+                              % (name, rule.axis))
+            if rule.target.kind == 'wheel' and \
+                    rule.release_threshold > rule.threshold:
+                warnings.append('[profile.%s.axis.%s] release_threshold > '
+                                'threshold，迟滞方向反了'
+                                % (name, rule.axis))
+    return errors, warnings
+
+
+def gate_errors(cfg):
+    """启动前必须为空的错误列表（warnings 只提示，不阻塞）。"""
+    return lint_config(cfg)[0]
+
+
+# ---------------------------------------------------------------------------
+# 运行时
+# ---------------------------------------------------------------------------
+@dataclass
+class FrameState:
+    pad: PadState = EMPTY
+    keys: frozenset = frozenset()
+    mouse: frozenset = frozenset()
+    dx: int = 0
+    dy: int = 0
+    wheel: int = 0
+    groups: dict = field(default_factory=dict)
+    toggled: tuple = ()
+
+
+NEUTRAL_PAD = PadState(axes=(0, -1, 0, -1), triggers=(0, 0))
+
+
+def _clamp(value, lo, hi):
+    return lo if value < lo else hi if value > hi else value
+
+
+def _shape(value, rule):
+    if rule.invert:
+        value = -value
+    mag = abs(value)
+    dz = _clamp(rule.deadzone, 0.0, 0.95)
+    if mag <= dz:
+        return 0.0
+    mag = (mag - dz) / (1.0 - dz)
+    if rule.curve and rule.curve != 1.0:
+        mag = mag ** rule.curve
+    return mag if value >= 0 else -mag
+
+
+def axis_norm(axis, raw):
+    """原始状态 → -1..1（摇杆向上为正）或 0..1（扳机）。"""
+    if axis == 'lx':
+        return _clamp(raw.axes[0] / 32768.0, -1.0, 1.0)
+    if axis == 'ly':
+        return _clamp(-raw.axes[1] / 32768.0, -1.0, 1.0)
+    if axis == 'rx':
+        return _clamp(raw.axes[2] / 32768.0, -1.0, 1.0)
+    if axis == 'ry':
+        return _clamp(-raw.axes[3] / 32768.0, -1.0, 1.0)
+    if axis == 'lt':
+        return raw.triggers[0] / 255.0
+    if axis == 'rt':
+        return raw.triggers[1] / 255.0
+    return 0.0                     # 体感轴等 M4 接上
+
+
+def key_order(code):
+    return (0 if code in MODIFIER_CODES else 1, code)
+
+
+class Mapper(object):
+    def __init__(self, profile, devices=None, clock=None):
+        self.devices = devices
+        self.clock = clock or time.monotonic
+        self.profile = profile
+        self.groups = {}
+        self.acc = {}
+        self.axis_state = {}
+        self.prev_held = frozenset()
+        self.last_now = None
+        self.out = FrameState()
+        self.set_profile(profile)
+
+    def set_profile(self, profile, groups=None):
+        self.profile = profile
+        self.groups = dict(profile.groups)
+        if groups:
+            self.groups.update(groups)
+        self.acc = {'mouse:x': 0.0, 'mouse:y': 0.0}
+        self.axis_state = {}
+        self.prev_held = frozenset()
+        self.last_now = None
+        self.out = FrameState(groups=dict(self.groups))
+
+    def reset(self):
+        self.acc = {'mouse:x': 0.0, 'mouse:y': 0.0}
+        self.axis_state = {}
+        self.prev_held = frozenset()
+        self.last_now = None
+        self.out = FrameState(groups=dict(self.groups))
+
+    # -- 主入口 ----------------------------------------------------------
+    def apply(self, raw, now=None):
+        if raw is None:
+            return self.out
+        now = self.clock() if now is None else now
+        dt = 0.0 if self.last_now is None else _clamp(now - self.last_now, 0, 0.1)
+        self.last_now = now
+
+        held = raw.buttons | raw.extras
+        pressed = held - self.prev_held
+        toggled = []
+
+        # 1) 组开关只认按下沿，先更新，后续条目按新状态计算。
+        for source, rule in self.profile.buttons.items():
+            if rule.target.kind != 'toggle' or source not in pressed:
+                continue
+            if not self._active(rule.group):
+                continue
+            name = rule.target.value
+            self.groups[name] = not self.groups.get(name, True)
+            toggled.append((name, self.groups[name]))
+
+        pad = self._build_pad(raw)
+        pad_buttons = set(pad.buttons)
+        pad_axes = list(pad.axes)
+        pad_triggers = list(pad.triggers)
+        keys = set()
+        mouse = set()
+        wheel = 0
+
+        for source, rule in self.profile.buttons.items():
+            if source not in held or not self._active(rule.group):
+                continue
+            step = self._add_target(rule.target, pad_buttons, keys, mouse)
+            # 按钮类滚轮只在按下沿滚一格，不能按住 1000 Hz 连发。
+            if rule.target.kind == 'wheel' and source not in pressed:
+                step = 0
+            wheel += step
+
+        for axis, rule in self.profile.axes.items():
+            value = axis_norm(axis, raw)
+            if not self._active(rule.group):
+                value = 0.0
+            self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
+                             keys, mouse)
+            wheel += self._axis_wheel(rule, value, now)
+            self._apply_keypair(rule, value, pad_buttons, keys, mouse)
+
+        dx, dy = self._flush_mouse()
+        pad = PadState(buttons=frozenset(pad_buttons), hat=pad.hat,
+                       axes=tuple(pad_axes), triggers=tuple(pad_triggers))
+
+        out = FrameState(pad=pad, keys=frozenset(keys),
+                         mouse=frozenset(mouse), dx=dx, dy=dy,
+                         wheel=int(wheel), groups=dict(self.groups),
+                         toggled=tuple(toggled))
+        self._commit(out)
+        self.prev_held = held
+        self.out = out
+        return out
+
+    # -- 内部 ------------------------------------------------------------
+    def _active(self, group):
+        if not group:
+            return True
+        return bool(self.groups.get(group, True))
+
+    def _build_pad(self, raw):
+        buttons = set()
+        axes = list(NEUTRAL_PAD.axes)
+        triggers = list(NEUTRAL_PAD.triggers)
+        hat_x = hat_y = 0
+
+        if self.profile.passthrough:
+            mapped = set(self.profile.buttons)
+            for name in raw.buttons:
+                if name in PAD_BUTTONS and name not in mapped:
+                    buttons.add(name)
+            if 'left' not in mapped and 'left' in raw.buttons:
+                hat_x = -1
+            elif 'right' not in mapped and 'right' in raw.buttons:
+                hat_x = 1
+            if 'up' not in mapped and 'up' in raw.buttons:
+                hat_y = -1
+            elif 'down' not in mapped and 'down' in raw.buttons:
+                hat_y = 1
+            if 'lx' not in self.profile.axes:
+                axes[0] = raw.axes[0]
+            if 'ly' not in self.profile.axes:
+                axes[1] = raw.axes[1]
+            if 'rx' not in self.profile.axes:
+                axes[2] = raw.axes[2]
+            if 'ry' not in self.profile.axes:
+                axes[3] = raw.axes[3]
+            if 'lt' not in self.profile.axes:
+                triggers[0] = raw.triggers[0]
+            if 'rt' not in self.profile.axes:
+                triggers[1] = raw.triggers[1]
+
+        return PadState(buttons=frozenset(buttons), hat=(hat_x, hat_y),
+                        axes=tuple(axes), triggers=tuple(triggers),
+                        extras=frozenset())
+
+    def _add_target(self, target, pad_buttons, keys, mouse):
+        """应用一个按钮目标，返回滚轮格数。"""
+        if target.kind == 'pad':
+            pad_buttons.add(target.value)
+        elif target.kind == 'key':
+            keys.update(target.value)
+        elif target.kind == 'mouse_button':
+            mouse.add(target.value)
+        elif target.kind == 'wheel':
+            return target.value
+        return 0
+
+    def _apply_axis(self, rule, value, dt, pad_axes, pad_triggers,
+                    keys, mouse):
+        target = rule.target
+        if target.kind == 'mouse_move':
+            if not dt or value == 0.0:
+                return
+            shaped = _shape(value, rule)
+            self.acc['mouse:' + target.value] += shaped * rule.max_speed * dt
+        elif target.kind == 'pad_axis':
+            bucket, idx = PAD_AXIS_INDEX[target.value]
+            if rule.invert:
+                value = -value
+            if bucket == 'axes':
+                raw = int(round(_clamp(value, -1.0, 1.0) * 32767))
+                if idx in (1, 3):
+                    raw = invert16(raw)
+                pad_axes[idx] = raw
+            else:
+                pad_triggers[idx] = int(round(_clamp(value, 0.0, 1.0) * 255))
+        elif target.kind in ('key', 'mouse_button'):
+            if rule.invert:
+                value = -value
+            if abs(value) >= rule.threshold:
+                if target.kind == 'key':
+                    keys.update(target.value)
+                else:
+                    mouse.add(target.value)
+
+    def _axis_wheel(self, rule, value, now):
+        if rule.target.kind != 'wheel':
+            return 0
+        state = self.axis_state.setdefault(
+            id(rule), {'active': False, 'next': 0.0})
+        if state['active']:
+            if value <= rule.release_threshold:
+                state['active'] = False
+                return 0
+            if rule.repeat_hz <= 0:
+                return 0
+            interval = 1.0 / rule.repeat_hz
+            steps = 0
+            while now >= state['next'] and steps < 10:
+                steps += 1
+                state['next'] += interval
+            return rule.target.value * steps
+        if value >= rule.threshold:
+            state['active'] = True
+            interval = 1.0 / rule.repeat_hz if rule.repeat_hz > 0 else 0.0
+            state['next'] = now + interval
+            return rule.target.value
+        return 0
+
+    def _apply_keypair(self, rule, value, pad_buttons, keys, mouse):
+        if rule.target.kind != 'keypair':
+            return
+        state = self.axis_state.setdefault(id(rule), {'side': 0})
+        scaled = _shape(value, rule)
+        side = 0 if scaled == 0 else (1 if scaled > 0 else -1)
+        state['side'] = side
+        chosen = rule.pos if side > 0 else rule.neg if side < 0 else None
+        if chosen is None:
+            return
+        self._add_target(chosen, pad_buttons, keys, mouse)
+
+    def _flush_mouse(self):
+        dx = int(self.acc['mouse:x'])
+        dy = int(self.acc['mouse:y'])
+        self.acc['mouse:x'] -= dx
+        self.acc['mouse:y'] -= dy
+        return dx, dy
+
+    def _commit(self, out):
+        if self.devices is None:
+            return
+        self.devices.pad.apply(out.pad)
+        self.devices.keyboard.apply(out.keys)
+        self.devices.mouse.apply(out.mouse, out.dx, out.dy, out.wheel)
+
+
+def describe(prev, cur):
+    """两帧 FrameState 的差异，给 --dry-run 用。"""
+    parts = []
+    pad_line = _pad_diff(prev.pad, cur.pad)
+    if pad_line:
+        parts.append(pad_line)
+    if cur.keys != prev.keys:
+        added = cur.keys - prev.keys
+        removed = prev.keys - cur.keys
+        if added:
+            parts.append('keys+%s' % ' '.join(_key_names(added)))
+        if removed:
+            parts.append('keys-%s' % ' '.join(_key_names(removed)))
+    if cur.mouse != prev.mouse:
+        if cur.mouse - prev.mouse:
+            parts.append('mouse+%s' % ' '.join(map(str, cur.mouse - prev.mouse)))
+        if prev.mouse - cur.mouse:
+            parts.append('mouse-%s' % ' '.join(map(str, prev.mouse - cur.mouse)))
+    if cur.dx or cur.dy:
+        parts.append('move(%d,%d)' % (cur.dx, cur.dy))
+    if cur.wheel:
+        parts.append('wheel%+d' % cur.wheel)
+    return ' '.join(parts)
+
+
+def _pad_diff(a, b):
+    parts = []
+    for name in sorted(b.buttons - a.buttons):
+        parts.append('+' + name)
+    for name in sorted(a.buttons - b.buttons):
+        parts.append('-' + name)
+    if a.hat != b.hat:
+        parts.append('hat=%s' % (b.hat,))
+    for name, old, new in zip(('lx', 'ly', 'rx', 'ry'), a.axes, b.axes):
+        if old != new:
+            parts.append('%s=%d' % (name, new))
+    for name, old, new in zip(('lt', 'rt'), a.triggers, b.triggers):
+        if old != new:
+            parts.append('%s=%d' % (name, new))
+    return ' '.join(parts)
+
+
+def _key_names(codes):
+    names = []
+    for code in sorted(codes, key=key_order):
+        name = ecodes.bytype[ecodes.EV_KEY].get(code, str(code))
+        names.append(name)
+    return names

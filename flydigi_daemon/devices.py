@@ -75,6 +75,18 @@ for _extra in ('REL_WHEEL_HI_RES', 'REL_HWHEEL_HI_RES'):
     if _code is not None:
         MOUSE_RELS.append(_code)
 
+MODIFIER_CODES = {
+    ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL,
+    ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT,
+    ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT,
+    ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA,
+}
+
+
+def _key_order(code):
+    return (0 if code in MODIFIER_CODES else 1, code)
+
+
 KB_NAME_DEFAULT = 'Flydigi DW4 Virtual Keyboard'
 MOUSE_NAME_DEFAULT = 'Flydigi DW4 Virtual Mouse'
 
@@ -83,9 +95,11 @@ class VirtualGamepad(object):
     """把 `PadState` 差量写进 uinput。只有变化时才写，1000 Hz 下开销很小。"""
 
     def __init__(self, name=PAD_NAME_DEFAULT, vendor=PAD_VID, product=PAD_PID,
-                 version=PAD_VERSION, with_ff=False):
+                 version=PAD_VERSION, with_ff=False, phys=None):
+        self.phys = phys or 'flydigi-daemon/%d/pad' % os.getpid()
         self.ui = UInput(pad_caps(with_ff), name=name, version=version,
-                         vendor=vendor, product=product, bustype=ecodes.BUS_USB)
+                         vendor=vendor, product=product, bustype=ecodes.BUS_USB,
+                         phys=self.phys)
         self.name = name
         self.cur = EMPTY
 
@@ -135,16 +149,36 @@ class VirtualGamepad(object):
 
 
 class VirtualKeyboard(object):
-    def __init__(self, name=KB_NAME_DEFAULT, vendor=0x1234, product=0x5678):
+    def __init__(self, name=KB_NAME_DEFAULT, vendor=0x1234, product=0x5678,
+                 phys=None):
+        self.phys = phys or 'flydigi-daemon/%d/keyboard' % os.getpid()
         self.ui = UInput({ecodes.EV_KEY: KEYBOARD_KEYS}, name=name,
                          version=0x0001, vendor=vendor, product=product,
-                         bustype=ecodes.BUS_USB)
+                         bustype=ecodes.BUS_USB, phys=self.phys)
         self.name = name
+        self.cur = set()
+
+    def apply(self, codes):
+        """差量写键盘：先松开不再需要的键，再按新键。
+
+        修饰键排在前面（组合键先按 Ctrl 再按字母），松开时反序。
+        """
+        codes = set(codes)
+        if codes == self.cur:
+            return False
+        removed = sorted(self.cur - codes, key=_key_order, reverse=True)
+        added = sorted(codes - self.cur, key=_key_order)
+        for code in removed:
+            self.ui.write(ecodes.EV_KEY, code, 0)
+        for code in added:
+            self.ui.write(ecodes.EV_KEY, code, 1)
+        if removed or added:
+            self.ui.syn()
+        self.cur = codes
+        return True
 
     def release_all(self):
-        for code in KEYBOARD_KEYS:
-            self.ui.write(ecodes.EV_KEY, code, 0)
-        self.ui.syn()
+        self.apply(set())
 
     def close(self):
         try:
@@ -154,17 +188,43 @@ class VirtualKeyboard(object):
 
 
 class VirtualMouse(object):
-    def __init__(self, name=MOUSE_NAME_DEFAULT, vendor=0x1234, product=0x5679):
+    def __init__(self, name=MOUSE_NAME_DEFAULT, vendor=0x1234, product=0x5679,
+                 phys=None):
+        self.phys = phys or 'flydigi-daemon/%d/mouse' % os.getpid()
         self.ui = UInput({ecodes.EV_KEY: MOUSE_BUTTONS,
                           ecodes.EV_REL: MOUSE_RELS},
                          name=name, version=0x0001, vendor=vendor,
-                         product=product, bustype=ecodes.BUS_USB)
+                         product=product, bustype=ecodes.BUS_USB,
+                         phys=self.phys)
         self.name = name
+        self.cur = set()
+
+    def apply(self, buttons=frozenset(), dx=0, dy=0, wheel=0):
+        """一次 SYN 内写完鼠标键差量 + 相对移动 + 滚轮。"""
+        buttons = set(buttons)
+        changed = False
+        for code in self.cur - buttons:
+            self.ui.write(ecodes.EV_KEY, code, 0)
+            changed = True
+        for code in buttons - self.cur:
+            self.ui.write(ecodes.EV_KEY, code, 1)
+            changed = True
+        if dx:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_X, int(dx))
+            changed = True
+        if dy:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_Y, int(dy))
+            changed = True
+        if wheel:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, int(wheel))
+            changed = True
+        if changed:
+            self.ui.syn()
+        self.cur = buttons
+        return changed
 
     def release_all(self):
-        for code in MOUSE_BUTTONS:
-            self.ui.write(ecodes.EV_KEY, code, 0)
-        self.ui.syn()
+        self.apply()
 
     def close(self):
         try:
@@ -223,12 +283,29 @@ class Devices(object):
 
 
 def device_node(dev):
-    """这台 uinput 设备自己的 event 节点；取不到（权限/旧版 evdev）返回 None。"""
-    try:
-        node = dev.ui.device
-    except Exception:               # noqa: BLE001
+    """按 `phys` 找这台 uinput 设备自己的 event 节点。
+
+    不能用 `UInput.device`：它按名字匹配，同名设备（物理 xpad、另一个
+    daemon 实例）会串台。`phys` 是每台设备唯一的。
+    """
+    phys = getattr(dev, 'phys', None)
+    if not phys:
         return None
-    return getattr(node, 'path', None)
+    base = '/sys/class/input'
+    try:
+        entries = sorted(os.listdir(base))
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.startswith('event'):
+            continue
+        try:
+            with open(os.path.join(base, entry, 'device', 'phys')) as f:
+                if f.read().strip() == phys:
+                    return '/dev/input/' + entry
+        except OSError:
+            continue
+    return None
 
 
 def scan_event_nodes(names):

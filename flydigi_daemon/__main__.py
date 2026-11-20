@@ -10,12 +10,13 @@ import argparse
 import sys
 
 from . import config as cfgmod
+from . import mapping
 
 
 def build_parser():
     ap = argparse.ArgumentParser(
         prog='flydigi-daemon',
-        description='飞智冰原狼4 Linux daemon（M1：透明转发）')
+        description='飞智冰原狼4 Linux daemon（M3：映射 DSL）')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     c = sub.add_parser('check', help='识别设备并审计当前板载槽')
@@ -35,12 +36,24 @@ def build_parser():
                    help='实时模式运行 N 秒后自动退出')
     r.add_argument('--max-frames', type=int, default=None,
                    help='回放最多处理多少帧')
+    r.add_argument('--profile', default=None,
+                   help='临时用指定 profile 启动（不读 state.json）')
     return ap
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     cfg = cfgmod.load(args.config)
+
+    errors, warnings = mapping.lint_config(cfg)
+    for warning in warnings:
+        print('⚠ %s' % warning)
+    if errors:
+        print('✗ 配置有 %d 处错误，先修好再启动：' % len(errors))
+        for error in errors:
+            print('  - %s' % error)
+        return 2
+
     try:
         if args.cmd == 'check':
             from .check import run
@@ -49,8 +62,10 @@ def main(argv=None):
         if args.replay:
             return run_replay(cfg, args.replay, dry_run=args.dry_run,
                               realtime=args.realtime,
-                              max_frames=args.max_frames)
-        return run_live(cfg, dry_run=args.dry_run, seconds=args.seconds)
+                              max_frames=args.max_frames,
+                              profile=args.profile)
+        return run_live(cfg, dry_run=args.dry_run, seconds=args.seconds,
+                        profile=args.profile)
     except PermissionError as exc:
         print('权限不足：%s' % exc)
         print('用 sudo 运行，或先配置 udev 规则（M6）。')

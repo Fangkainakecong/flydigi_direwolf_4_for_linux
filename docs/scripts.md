@@ -15,6 +15,15 @@ sudo python3 -m flydigi_daemon run --seconds 20          # 跑 20 秒自测
 python3 -m flydigi_daemon run --replay captures/x.bin --dry-run  # 无手柄回放
 python3 tests/test_m1.py                 # 离线回归（报文 → 状态）
 python3 tests/test_m2.py                 # 离线回归（SELECT+ABXY 四槽仲裁）
+python3 tests/test_m3.py                 # 离线回归（映射 DSL）
+```
+
+`run --profile desktop` 可以临时用某套配置启动（不读 `state.json`），
+配合 `--replay --dry-run` 可以在没有手柄时检查映射结果：
+
+```bash
+python3 -m flydigi_daemon run --replay captures/inputs_20261119-000420.bin \
+    --dry-run --profile desktop
 ```
 
 M2 起 `run` 会加载 `state.json`（root 为 `/var/lib/flydigi/state.json`，

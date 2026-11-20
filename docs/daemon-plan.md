@@ -220,7 +220,7 @@ deadzone = 0.35
 显式条目覆盖对应输入。M1/M2/FN/Turbo 不在标准输入里，必须显式写，
 否则就是死键。
 
-### 4.5 配置校验（`flydigi-daemon check`）
+### 4.5 配置校验（启动前 / `flydigi-daemon check`）
 
 - TOML 语法、profile 引用、`slot_profiles` 长度 = 4。
 - 键名必须是合法 evdev 名；未知名字报错并给最接近的建议。
@@ -228,6 +228,11 @@ deadzone = 0.35
 - 轴条目只能出现在 `axis` 下；按钮目标不能写 `mouse:x`。
 - 同一个物理输入不能既在顶层又在 `axis` 里。
 - 目标冲突只警告（引用计数允许共存）。
+- 排查映射时可用 `run --replay ... --dry-run --profile desktop`，不碰硬件。
+
+实现上的两个约定：`mouse:x/y` 只能用在 `axis` 下；其它 `mouse:left/right/...`
+是按钮目标（可配合 `threshold` 用在轴条目）。摇杆 Y 轴在引擎内部统一成
+XInput 语义（向上为正），写回手柄时再转 evdev。
 
 ---
 
@@ -796,11 +801,21 @@ jstest /dev/input/jsN
 - `--replay` **不写** `state.json`，避免回放旧抓包改掉用户当前槽
 - 验收：按住 SELECT 连按 A/B 只切一次；`kill -9` 后重新启动无残留按键
 
-### M3：映射 DSL
+### M3：映射 DSL（代码完成，待硬件验收）
 
-- 按钮/扳机/摇杆 → 手柄键、键盘键、鼠标键、滚轮
-- 宏（按下/松开序列、延时）、turbo（频率）、摇杆曲线、扳机行程
-- `config/default.toml` 已经是目标格式；先做 lint，再做回放测试
+实现：`flydigi_daemon/mapping.py`；键盘/鼠标的差量写入在 `devices.py`；
+`tests/test_m3.py` 20 项离线全过。
+
+- 已支持：按钮/扳机/摇杆 → `xbox:*`、`key:*`（含组合键）、`mouse:*`、
+  `wheel:*`、`toggle:*`；轴 → `mouse:x/y`、`keypair`、阈值按键/鼠标、
+  阈值滚轮（迟滞 + `repeat_hz` 连发）、`xbox:abs_*`
+- `passthrough = true` 原样转发标准输入；显式条目覆盖对应输入（含轴和十字键）
+- 组：按钮/轴条目可带 `group`；`toggle:<组>` 只认按下沿，关组立即释放
+- 启动前和 `check` 都会 lint；有错误直接退出码 2，warnings 只提示
+- `--profile NAME` 可临时指定 profile（回放/排查用，不读 `state.json`）
+- 组合键先按修饰键、后按普通键，松开反序；多来源映射同一目标自动去重
+- 尚未包含：宏、`turbo` 连发（M3b）、体感轴（M4）
+
 - 验收：任意按钮映射到任意目标；`.bin` 回放断言通过
 
 ### M4：体感与标定

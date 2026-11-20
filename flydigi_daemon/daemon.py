@@ -14,6 +14,7 @@ import struct
 import time
 
 from . import config as cfgmod
+from . import mapping
 from . import report as rep
 from . import usb
 from .devices import Devices, device_node, scan_event_nodes
@@ -56,7 +57,7 @@ def _make_slots(cfg, persist=True, on_switch=None):
     )
 
 
-def run_live(cfg, dry_run=False, seconds=None):
+def run_live(cfg, dry_run=False, seconds=None, profile=None):
     devcfg = cfgmod.device_section(cfg)
     dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
     if not dev:
@@ -64,7 +65,7 @@ def run_live(cfg, dry_run=False, seconds=None):
               % (devcfg['vendor'], devcfg['product']))
         return 1
 
-    print('M1 透明转发' + ('（dry-run，不建虚拟设备）' if dry_run else ''))
+    print('飞智 daemon（M3 映射）' + ('（dry-run，不建虚拟设备）' if dry_run else ''))
     print('手柄: %s' % dev)
     pad = usb.Pad(dev, interface=devcfg['interface'])
     link = None
@@ -86,24 +87,38 @@ def run_live(cfg, dry_run=False, seconds=None):
             print('提示：物理手柄已由 daemon 独占；Steam/RetroArch 用虚拟手柄。')
 
         t0 = time.time()
+        profiles = mapping.parse_config(cfg)
+        ctrl = _make_slots(cfg)
+        if ctrl.profile not in profiles:
+            print('✗ state.json 里的 profile %r 不在配置里' % (ctrl.profile,))
+            return 1
+        start_profile = profile or ctrl.profile
+        if start_profile not in profiles:
+            print('✗ profile %r 不在配置里（可用：%s）'
+                  % (start_profile, ', '.join(sorted(profiles))))
+            return 1
+        mapper = mapping.Mapper(profiles[start_profile],
+                                devices=None if dry_run else devs)
 
         def on_switch(index, name, letter):
             if devs is not None:
                 devs.release_all()
+            mapper.set_profile(profiles[name])
             print('%s 配置 → %d/%d %s（SELECT+%s）'
                   % (_fmt_elapsed(time.time() - t0), index + 1,
                      len(ctrl.profiles), name, letter.upper()))
 
-        ctrl = _make_slots(cfg, on_switch=on_switch)
-        print('当前配置: %d/%d %s'
-              % (ctrl.slot + 1, len(ctrl.profiles), ctrl.profile))
+        ctrl.on_switch = on_switch
+        print('当前配置: %s（槽 %d/%d）'
+              % (start_profile, ctrl.slot + 1, len(ctrl.profiles)))
 
         watchdog = float(cfgmod.safety_section(cfg).get('watchdog_ms', 1500)) / 1000.0
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
         last_reset = 0.0
-        prev = ctrl.out
+        prev = mapper.out
+        prev_extras = frozenset()
         while flag['running']:
             if seconds is not None and time.time() - t0 >= seconds:
                 break
@@ -112,13 +127,16 @@ def run_live(cfg, dry_run=False, seconds=None):
                 now = time.time()
                 flushed = ctrl.tick(now)
                 if flushed is not None:
+                    frame = mapper.apply(flushed, now)
+                    for name, value in frame.toggled:
+                        print('%s [group] %s=%s'
+                              % (_fmt_elapsed(now - t0), name,
+                                 'on' if value else 'off'))
                     if dry_run:
-                        line = describe(prev, flushed)
+                        line = mapping.describe(prev, frame)
                         if line:
                             print('%s %s' % (_fmt_elapsed(now - t0), line))
-                    else:
-                        devs.pad.apply(flushed)
-                    prev = flushed
+                    prev = frame
                 if now - link.last_data > watchdog and now - last_reset > watchdog:
                     print('⚠ %.1f s 没有报文，重置 URB' % (now - link.last_data))
                     link.reset_urbs()
@@ -138,9 +156,9 @@ def run_live(cfg, dry_run=False, seconds=None):
             state = translate(data)
             if state is None:
                 continue
-            if state.extras != prev.extras and not dry_run:
-                added = state.extras - prev.extras
-                removed = prev.extras - state.extras
+            if state.extras != prev_extras and not dry_run:
+                added = state.extras - prev_extras
+                removed = prev_extras - state.extras
                 if added:
                     print('%s [extra] +%s'
                           % (_fmt_elapsed(time.time() - t0),
@@ -149,14 +167,18 @@ def run_live(cfg, dry_run=False, seconds=None):
                     print('%s [extra] -%s'
                           % (_fmt_elapsed(time.time() - t0),
                              ' -'.join(sorted(removed))))
+            prev_extras = state.extras
             out = ctrl.feed(state, time.time())
+            frame = mapper.apply(out, time.time())
+            for name, value in frame.toggled:
+                print('%s [group] %s=%s'
+                      % (_fmt_elapsed(time.time() - t0), name,
+                         'on' if value else 'off'))
             if dry_run:
-                line = describe(prev, out)
+                line = mapping.describe(prev, frame)
                 if line:
                     print('%s %s' % (_fmt_elapsed(time.time() - t0), line))
-            else:
-                devs.pad.apply(out)
-            prev = out
+            prev = frame
     except KeyboardInterrupt:
         print('\n已中断，正在收尾…')
     finally:
@@ -193,7 +215,8 @@ def load_capture(path):
     return [(ts - t0, d) for ts, d in frames]
 
 
-def run_replay(cfg, path, dry_run=False, realtime=False, max_frames=None):
+def run_replay(cfg, path, dry_run=False, realtime=False,
+               max_frames=None, profile=None):
     """回放抓包，不需要 USB/root（dry-run 时连 uinput 都不建）。"""
     frames = load_capture(path)
     print('回放: %s（%d 帧%s）'
@@ -204,19 +227,30 @@ def run_replay(cfg, path, dry_run=False, realtime=False, max_frames=None):
         print('虚拟设备:')
         _print_devices(devs)
     now_ts = [0.0]
+    profiles = mapping.parse_config(cfg)
+    # 回放绝不能改真实的状态文件，否则按一次 SELECT+A 就把用户的槽位改了。
+    ctrl = _make_slots(cfg, persist=False)
+    if ctrl.profile not in profiles:
+        raise SystemExit('state 里的 profile %r 不在配置里' % (ctrl.profile,))
+    start_profile = profile or ctrl.profile
+    if start_profile not in profiles:
+        raise SystemExit('profile %r 不在配置里（可用：%s）'
+                         % (start_profile, ', '.join(sorted(profiles))))
+    mapper = mapping.Mapper(profiles[start_profile],
+                            devices=None if dry_run else devs)
 
     def on_switch(index, name, letter):
         if devs is not None:
-            devs.pad.release_all()
+            devs.release_all()
+        mapper.set_profile(profiles[name])
         print('%s 配置 → %d/%d %s（SELECT+%s）'
               % (_fmt_elapsed(now_ts[0]), index + 1,
                  len(ctrl.profiles), name, letter.upper()))
 
-    # 回放绝不能改真实的状态文件，否则按一次 SELECT+A 就把用户的槽位改了。
-    ctrl = _make_slots(cfg, persist=False, on_switch=on_switch)
-    print('起始配置: %d/%d %s'
-          % (ctrl.slot + 1, len(ctrl.profiles), ctrl.profile))
-    prev = ctrl.out
+    ctrl.on_switch = on_switch
+    print('起始配置: %s（槽 %d/%d）'
+          % (start_profile, ctrl.slot + 1, len(ctrl.profiles)))
+    prev = mapper.out
     t0 = time.time()
     shown = 0
     try:
@@ -235,13 +269,15 @@ def run_replay(cfg, path, dry_run=False, realtime=False, max_frames=None):
                 continue
             shown += 1
             out = ctrl.feed(state, ts)
+            frame = mapper.apply(out, ts)
+            for name, value in frame.toggled:
+                print('%s [group] %s=%s'
+                      % (_fmt_elapsed(ts), name, 'on' if value else 'off'))
             if dry_run:
-                line = describe(prev, out)
+                line = mapping.describe(prev, frame)
                 if line:
                     print('%s %s' % (_fmt_elapsed(ts), line))
-            else:
-                devs.pad.apply(out)
-            prev = out
+            prev = frame
         if not dry_run:
             # 回放结束时把状态归零，避免留下"按住不放"的键。
             devs.pad.release_all()
