@@ -21,7 +21,7 @@ startup_profile = "gamepad"
 # 组合键修饰键：`back` = SELECT。改成 `fn` 就会用 FN，但 FN 组合被固件占用，不推荐。
 chord_button = "back"
 # SELECT 单独按住超过这个时间就当作普通按键，避免每次切配置都延迟 Back。
-chord_window_ms = 120
+chord_window_ms = 200
 # 切配置时把组合键从输出里吞掉，游戏不会收到 Back+A。
 suppress_chord = true
 # 上次的配置存在这里；留空 = root 用 /var/lib/flydigi/state.json，

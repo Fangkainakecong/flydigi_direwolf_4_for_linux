@@ -25,6 +25,8 @@ def st(*buttons):
 
 
 def make(state_path=None, **kw):
+    # 测试里固定用 120 ms，断言的时间点才不用跟着默认值改。
+    kw.setdefault('window_ms', 120)
     calls = []
 
     def on_switch(index, name, letter):

@@ -47,7 +47,7 @@ def _make_slots(cfg, persist=True, on_switch=None):
     return SlotController(
         profiles,
         chord=d.get('chord_button', 'back'),
-        window_ms=int(d.get('chord_window_ms', 120)),
+        window_ms=int(d.get('chord_window_ms', 200)),
         suppress=bool(d.get('suppress_chord', True)),
         state_path=cfgmod.state_file(cfg),
         startup_profile=d.get('startup_profile'),

@@ -4,10 +4,10 @@
 所以由 daemon 自己解释，不碰板载槽，切换零停顿。对应
 [daemon-plan.md](../docs/daemon-plan.md) §5。
 
-仲裁规则（120 ms 窗口）::
+仲裁规则（默认 200 ms 窗口，可配）::
 
     t0            SELECT 按下
-    t0..t0+120ms  等组合键，Back 先不输出
+    t0..t0+200ms  等组合键，Back 先不输出
       ├─ 窗口内按下 A/B/X/Y → 吞掉两键，切到对应 profile，
       │                       一直吞到所有键松开
       └─ 超时          → 输出 Back，之后 ABXY 正常透传
@@ -52,7 +52,7 @@ def default_state_path():
 class SlotController(object):
     """把原始 `PadState` 过滤成"该发给游戏的" `PadState`，并维护当前槽。"""
 
-    def __init__(self, profiles, chord='back', window_ms=120, suppress=True,
+    def __init__(self, profiles, chord='back', window_ms=200, suppress=True,
                  state_path=None, startup_profile=None, persist=True,
                  clock=None, on_switch=None):
         self.profiles = list(profiles) or ['default']

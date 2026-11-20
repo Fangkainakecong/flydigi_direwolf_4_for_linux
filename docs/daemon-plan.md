@@ -263,7 +263,7 @@ deadzone = 0.35
 
 ```
 t0        SELECT 按下
-t0+0..120ms   等待窗口（Back 暂不输出）
+t0+0..200ms   等待窗口（Back 暂不输出）
   ├─ 窗口内按下 A/B/X/Y
   │     → 吞掉 SELECT 和该键，切到对应 profile
   │     → 一直吞到两键都松开（防止残余按下）
@@ -272,7 +272,8 @@ t0+0..120ms   等待窗口（Back 暂不输出）
         → 之后按 A/B/X/Y 正常输出
 ```
 
-- 窗口 120 ms：正常人手按组合键在 50 ms 内完成，120 ms 足够宽松。
+- 窗口默认 200 ms（`chord_window_ms`）：正常人手按组合键在 50 ms 内完成，
+  200 ms 留足余量；代价是单独按 SELECT 最多晚 200 ms 输出。
   实测 `SELECT+A` 两键是**同时**出现在报文里的，没有先后顺序问题。
 - 窗口只影响 SELECT 单独按下的延迟，不影响其它键。
 - 组合判定成功时，`back` 和字母**都不输出**，直到两键都松开——否则游戏会
@@ -786,7 +787,7 @@ jstest /dev/input/jsN
 实现：`flydigi_daemon/slots.py`（`SlotController`），接在 `translate()`
 之后、`uinput` 之前；`tests/test_m2.py` 12 项离线全过。
 
-- 120 ms 仲裁窗口；`SELECT+ABXY` 吞掉 `back` 和字母，直到所有键松开
+- 200 ms 仲裁窗口；`SELECT+ABXY` 吞掉 `back` 和字母，直到所有键松开
 - `slot_profiles = [a, b, c, d]` 按 SELECT 的字母选表；状态存 `state.json`
   （root = `/var/lib/flydigi/state.json`，普通用户 =
   `~/.local/state/flydigi/state.json`，可用 `[daemon] state_file` 覆盖）
