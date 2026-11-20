@@ -14,7 +14,12 @@ sudo python3 -m flydigi_daemon run       # 独占手柄，创建三台 uinput �
 sudo python3 -m flydigi_daemon run --seconds 20          # 跑 20 秒自测
 python3 -m flydigi_daemon run --replay captures/x.bin --dry-run  # 无手柄回放
 python3 tests/test_m1.py                 # 离线回归（报文 → 状态）
+python3 tests/test_m2.py                 # 离线回归（SELECT+ABXY 四槽仲裁）
 ```
+
+M2 起 `run` 会加载 `state.json`（root 为 `/var/lib/flydigi/state.json`，
+普通用户为 `~/.local/state/flydigi/state.json`），记录上次的 profile；
+`--replay` 只读不写。
 
 - `run` 会先 `modprobe -r xpad`，退出（含异常）自动恢复；`--dry-run` 不建虚拟设备。
 - `check` 返回码：0 干净，1 设备/读取失败，2 当前槽有键盘/宏映射。

@@ -33,18 +33,20 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
   Turbo 在位图可见）、出厂 `.dat` → 840 字节翻译
 - ✅ 传输层断点复核：抓包段内稳定 1000 Hz，此前"切槽卡顿 1 秒"已确认是
   探针测量假象（`scripts/flydigi_gap_report.py`）
-- 🟡 **M1 代码完成，待硬件验收**：`flydigi_daemon/` 包，独占 dongle +
-  三台 uinput + 标准输入 1:1 透传；M1/M2/FN/Turbo 已在日志里可见。
-  `check` / `run` / `--replay --dry-run` 都已就绪，`tests/test_m1.py` 离线可跑。
-- ⏳ 映射 DSL、四槽切换、体感→鼠标、FF 透传尚未实现（M2–M5）
+- ✅ **M1 硬件验收通过（2026-11-20）**：`check` 识别固件 4.0.7.2、槽 3 干净；
+  `run` 建出三台虚拟设备，M1/M2/FN/Turbo 在日志里可见；Ctrl-C 后 xpad 恢复
+- 🟡 **M2 代码完成，待硬件验收**：`SELECT+A/B/X/Y` 软件四槽（120 ms 仲裁、
+  吞键、`state.json` 记忆），`tests/test_m2.py` 12 项离线全过
+- ⏳ 映射 DSL、体感→鼠标、FF 透传尚未实现（M3–M5）
 
-### M1 快速开始
+### 快速开始
 
 ```bash
 sudo python3 -m flydigi_daemon check     # 识别 + 当前板载槽审计（会短暂接管）
 sudo python3 -m flydigi_daemon run       # 独占手柄；另开终端 evtest / jstest
+# daemon 跑着时按 SELECT+A/B/X/Y 切四套配置，终端会打印“配置 → n/4 …”
 python3 -m flydigi_daemon run --replay captures/xxx.bin --dry-run   # 无手柄回放
-python3 tests/test_m1.py                 # 纯离线回归
+python3 tests/test_m1.py && python3 tests/test_m2.py                # 纯离线回归
 ```
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测

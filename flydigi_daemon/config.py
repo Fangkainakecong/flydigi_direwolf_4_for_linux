@@ -44,6 +44,13 @@ def slot_profiles(cfg):
     return names
 
 
+def state_file(cfg):
+    """`[daemon] state_file`；留空则按 root/普通用户选默认路径。"""
+    from .slots import default_state_path
+    path = daemon_section(cfg).get('state_file') or ''
+    return os.path.expanduser(path) if path else default_state_path()
+
+
 def device_section(cfg):
     dev = cfg.get('device', {})
     return {

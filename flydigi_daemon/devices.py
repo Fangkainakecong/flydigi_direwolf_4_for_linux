@@ -203,6 +203,15 @@ class Devices(object):
             self.close()
             raise
 
+    def release_all(self):
+        """键盘/鼠标/手柄全部归零；切配置、panic、退出都走这里。"""
+        for dev in (self.pad, self.keyboard, self.mouse):
+            if dev is not None:
+                try:
+                    dev.release_all()
+                except Exception:       # noqa: BLE001
+                    pass
+
     def close(self):
         for dev in (self.mouse, self.keyboard, self.pad):
             if dev is not None:
@@ -211,6 +220,15 @@ class Devices(object):
                 except Exception:       # noqa: BLE001
                     pass
         self.pad = self.keyboard = self.mouse = None
+
+
+def device_node(dev):
+    """这台 uinput 设备自己的 event 节点；取不到（权限/旧版 evdev）返回 None。"""
+    try:
+        node = dev.ui.device
+    except Exception:               # noqa: BLE001
+        return None
+    return getattr(node, 'path', None)
 
 
 def scan_event_nodes(names):

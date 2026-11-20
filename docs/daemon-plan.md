@@ -781,11 +781,18 @@ jstest /dev/input/jsN
 # Ctrl-C 后：xpad 自动回来，evtest 里没有卡住的键
 ```
 
-### M2：软件四槽
+### M2：软件四槽（代码完成，待硬件验收）
 
-- 120 ms 仲裁窗口；`SELECT+ABXY` 吞掉 `back` 和字母，直到两键都松开
+实现：`flydigi_daemon/slots.py`（`SlotController`），接在 `translate()`
+之后、`uinput` 之前；`tests/test_m2.py` 12 项离线全过。
+
+- 120 ms 仲裁窗口；`SELECT+ABXY` 吞掉 `back` 和字母，直到所有键松开
 - `slot_profiles = [a, b, c, d]` 按 SELECT 的字母选表；状态存 `state.json`
-- 切换时 `release_all()` → 换表 → 体感组复位 → 短震确认（震动在 M5 接上后生效）
+  （root = `/var/lib/flydigi/state.json`，普通用户 =
+  `~/.local/state/flydigi/state.json`，可用 `[daemon] state_file` 覆盖）
+- 只认边沿：先按住 A 再按 SELECT 不算组合；窗口内按其它键会立刻放行 Back
+- 切换时 `release_all()` → 换表；体感组复位、短震确认在 M4/M5 接上
+- `--replay` **不写** `state.json`，避免回放旧抓包改掉用户当前槽
 - 验收：按住 SELECT 连按 A/B 只切一次；`kill -9` 后重新启动无残留按键
 
 ### M3：映射 DSL

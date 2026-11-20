@@ -16,8 +16,9 @@ import time
 from . import config as cfgmod
 from . import report as rep
 from . import usb
-from .devices import Devices, scan_event_nodes
-from .translate import EMPTY, describe, translate
+from .devices import Devices, device_node, scan_event_nodes
+from .slots import SlotController
+from .translate import describe, translate
 
 
 def _fmt_elapsed(seconds):
@@ -36,9 +37,23 @@ def _print_devices(devs):
                               devs.mouse.name})
     for role, dev in (('手柄', devs.pad), ('键盘', devs.keyboard),
                       ('鼠标', devs.mouse)):
-        print('  %-3s %-18s %s'
-              % (role, ' '.join(nodes.get(dev.name, ['(未找到节点)'])),
-                 dev.name))
+        node = device_node(dev) or ' '.join(nodes.get(dev.name, ['(未找到节点)']))
+        print('  %-3s %-18s %s' % (role, node, dev.name))
+
+
+def _make_slots(cfg, persist=True, on_switch=None):
+    d = cfgmod.daemon_section(cfg)
+    profiles = cfgmod.slot_profiles(cfg) or ['default']
+    return SlotController(
+        profiles,
+        chord=d.get('chord_button', 'back'),
+        window_ms=int(d.get('chord_window_ms', 120)),
+        suppress=bool(d.get('suppress_chord', True)),
+        state_path=cfgmod.state_file(cfg),
+        startup_profile=d.get('startup_profile'),
+        persist=persist,
+        on_switch=on_switch,
+    )
 
 
 def run_live(cfg, dry_run=False, seconds=None):
@@ -70,19 +85,40 @@ def run_live(cfg, dry_run=False, seconds=None):
             _print_devices(devs)
             print('提示：物理手柄已由 daemon 独占；Steam/RetroArch 用虚拟手柄。')
 
+        t0 = time.time()
+
+        def on_switch(index, name, letter):
+            if devs is not None:
+                devs.release_all()
+            print('%s 配置 → %d/%d %s（SELECT+%s）'
+                  % (_fmt_elapsed(time.time() - t0), index + 1,
+                     len(ctrl.profiles), name, letter.upper()))
+
+        ctrl = _make_slots(cfg, on_switch=on_switch)
+        print('当前配置: %d/%d %s'
+              % (ctrl.slot + 1, len(ctrl.profiles), ctrl.profile))
+
         watchdog = float(cfgmod.safety_section(cfg).get('watchdog_ms', 1500)) / 1000.0
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
-        t0 = time.time()
         last_reset = 0.0
-        prev = EMPTY
+        prev = ctrl.out
         while flag['running']:
             if seconds is not None and time.time() - t0 >= seconds:
                 break
             got = pad.reap()
             if got is None:
                 now = time.time()
+                flushed = ctrl.tick(now)
+                if flushed is not None:
+                    if dry_run:
+                        line = describe(prev, flushed)
+                        if line:
+                            print('%s %s' % (_fmt_elapsed(now - t0), line))
+                    else:
+                        devs.pad.apply(flushed)
+                    prev = flushed
                 if now - link.last_data > watchdog and now - last_reset > watchdog:
                     print('⚠ %.1f s 没有报文，重置 URB' % (now - link.last_data))
                     link.reset_urbs()
@@ -113,13 +149,14 @@ def run_live(cfg, dry_run=False, seconds=None):
                     print('%s [extra] -%s'
                           % (_fmt_elapsed(time.time() - t0),
                              ' -'.join(sorted(removed))))
+            out = ctrl.feed(state, time.time())
             if dry_run:
-                line = describe(prev, state)
+                line = describe(prev, out)
                 if line:
                     print('%s %s' % (_fmt_elapsed(time.time() - t0), line))
             else:
-                devs.pad.apply(state)
-            prev = state
+                devs.pad.apply(out)
+            prev = out
     except KeyboardInterrupt:
         print('\n已中断，正在收尾…')
     finally:
@@ -166,13 +203,27 @@ def run_replay(cfg, path, dry_run=False, realtime=False, max_frames=None):
         devs = Devices(cfg)
         print('虚拟设备:')
         _print_devices(devs)
-    prev = EMPTY
+    now_ts = [0.0]
+
+    def on_switch(index, name, letter):
+        if devs is not None:
+            devs.pad.release_all()
+        print('%s 配置 → %d/%d %s（SELECT+%s）'
+              % (_fmt_elapsed(now_ts[0]), index + 1,
+                 len(ctrl.profiles), name, letter.upper()))
+
+    # 回放绝不能改真实的状态文件，否则按一次 SELECT+A 就把用户的槽位改了。
+    ctrl = _make_slots(cfg, persist=False, on_switch=on_switch)
+    print('起始配置: %d/%d %s'
+          % (ctrl.slot + 1, len(ctrl.profiles), ctrl.profile))
+    prev = ctrl.out
     t0 = time.time()
     shown = 0
     try:
         for idx, (ts, data) in enumerate(frames):
             if max_frames is not None and idx >= max_frames:
                 break
+            now_ts[0] = ts
             if realtime:
                 wait = t0 + ts - time.time()
                 if wait > 0:
@@ -183,13 +234,14 @@ def run_replay(cfg, path, dry_run=False, realtime=False, max_frames=None):
             if state is None:
                 continue
             shown += 1
+            out = ctrl.feed(state, ts)
             if dry_run:
-                line = describe(prev, state)
+                line = describe(prev, out)
                 if line:
                     print('%s %s' % (_fmt_elapsed(ts), line))
             else:
-                devs.pad.apply(state)
-            prev = state
+                devs.pad.apply(out)
+            prev = out
         if not dry_run:
             # 回放结束时把状态归零，避免留下"按住不放"的键。
             devs.pad.release_all()
