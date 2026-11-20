@@ -13,7 +13,7 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 3. **按键→键鼠映射**：桌面全局生效（uinput 键盘/鼠标，不依赖 Steam Input）
 4. **配置切换**：`SELECT + A/B/X/Y` 四套配置，固件槽位留给 Windows
 
-## 当前状态 (2026-11-19)
+## 当前状态 (2026-11-20)
 
 - ✅ usbfs 异步 URB 传输层验证通过（IN 读 ~1000Hz、rumble OUT、厂商指令 ACK）
 - ✅ 32 字节输入报文完全解码（标准按钮字、扳机、四轴、飞智键位位图）
@@ -33,9 +33,19 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
   Turbo 在位图可见）、出厂 `.dat` → 840 字节翻译
 - ✅ 传输层断点复核：抓包段内稳定 1000 Hz，此前"切槽卡顿 1 秒"已确认是
   探针测量假象（`scripts/flydigi_gap_report.py`）
-- ⏳ **M1 透明转发**（下一步）：独占 dongle + 三台 uinput，先把标准键/轴
-  做到和 xpad 一致，再加映射/体感/震动
-- ⏳ 守护进程（uinput + 体感→鼠标 + 四槽切换）尚未实现
+- 🟡 **M1 代码完成，待硬件验收**：`flydigi_daemon/` 包，独占 dongle +
+  三台 uinput + 标准输入 1:1 透传；M1/M2/FN/Turbo 已在日志里可见。
+  `check` / `run` / `--replay --dry-run` 都已就绪，`tests/test_m1.py` 离线可跑。
+- ⏳ 映射 DSL、四槽切换、体感→鼠标、FF 透传尚未实现（M2–M5）
+
+### M1 快速开始
+
+```bash
+sudo python3 -m flydigi_daemon check     # 识别 + 当前板载槽审计（会短暂接管）
+sudo python3 -m flydigi_daemon run       # 独占手柄；另开终端 evtest / jstest
+python3 -m flydigi_daemon run --replay captures/xxx.bin --dry-run   # 无手柄回放
+python3 tests/test_m1.py                 # 纯离线回归
+```
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 
@@ -52,7 +62,9 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 ## 目录
 
 ```
-scripts/          实验脚本（需 sudo，跑完自动恢复 xpad）+ 共用模块
+flydigi_daemon/   M1 起的正式代码（daemon 包）
+scripts/          实验脚本（需 sudo，跑完自动恢复 xpad）+ 兼容层
+tests/            离线回归（不需要手柄）
 config/           daemon 配置样例（default.toml、calibration.example.json）
 docs/             协议文档 + 方案 + 脚本说明
 reference/openflydigi/   上游确认有用的代码（参考件，import 路径未改）

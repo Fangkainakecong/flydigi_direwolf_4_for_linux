@@ -2,7 +2,25 @@
 
 > 配套方案文档: [docs/daemon-plan.md](daemon-plan.md)（新）与 [docs/plan.md](plan.md)（早期草案）
 > 全部脚本需 sudo 运行（直接操作 USB 设备），运行结束自动恢复 xpad 驱动
-> 日期: 2026-11-18
+> 日期: 2026-11-18（2026-11-20 补 M1 daemon）
+
+## M1 正式代码（`flydigi_daemon/`）
+
+从 M1 起，正式实现放在 `flydigi_daemon/` 包；`scripts/` 只保留探针和兼容层。
+
+```bash
+sudo python3 -m flydigi_daemon check     # 识别 + 审计当前板载槽（会短暂接管）
+sudo python3 -m flydigi_daemon run       # 独占手柄，创建三台 uinput 透传
+sudo python3 -m flydigi_daemon run --seconds 20          # 跑 20 秒自测
+python3 -m flydigi_daemon run --replay captures/x.bin --dry-run  # 无手柄回放
+python3 tests/test_m1.py                 # 离线回归（报文 → 状态）
+```
+
+- `run` 会先 `modprobe -r xpad`，退出（含异常）自动恢复；`--dry-run` 不建虚拟设备。
+- `check` 返回码：0 干净，1 设备/读取失败，2 当前槽有键盘/宏映射。
+- M1 只做标准键/轴 1:1 透传；M1/M2/FN/Turbo 以 `[extra]` 行打印，等 M3 映射。
+- `scripts/flydigi_usb.py`、`scripts/flydigi_report.py` 现在是兼容层，
+  实现已移到 `flydigi_daemon/usb.py`、`report.py`，旧探针无需改动。
 
 ## 脚本清单
 

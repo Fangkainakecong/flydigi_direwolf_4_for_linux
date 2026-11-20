@@ -744,9 +744,14 @@ flydigi_direwolf_4_for_linux/
 > 2026-11-19 更新：M0 已完成。`control_probe` 确认 **SELECT+A/B/X/Y 是空键位**，
 > 软件四槽成立；FN+A/B/X/Y 属于固件，daemon 不碰。
 
-### M1：透明转发（当前阶段）
+### M1：透明转发（代码完成，待硬件验收）
 
 目标：**先做到和 xpad 一样**，再加任何功能。M1 不改映射、不做体感、不做宏。
+
+实现位置：`flydigi_daemon/`（`usb.py` / `report.py` / `translate.py` /
+`devices.py` / `daemon.py` / `check.py` / `config.py` / `__main__.py`），
+`scripts/flydigi_usb.py` 与 `scripts/flydigi_report.py` 保留为兼容层。
+离线回归：`python3 tests/test_m1.py`。
 
 任务：
 
@@ -759,6 +764,7 @@ flydigi_direwolf_4_for_linux/
    - `__main__.py`：`python3 -m flydigi_daemon run|check`
 2. **透传范围**：标准按钮字、LT/RT、左右摇杆、十字键、Home。
    M1/M2/FN/Turbo 只记日志（它们不在标准字里，等 M3 再映射）。
+   已实现；`--dry-run` 会打印 `[extra] +m1` 之类。
 3. **收尾**：任何退出路径都 `release_all()` + `modprobe xpad`；`SIGKILL` 没法收尾，
    所以启动时先做一次"残局清理"（若有旧虚拟设备/残留 xpad 状态）。
 4. **`check` 子命令**：只读识别设备、打印槽位/固件/当前板载槽审计结果，
