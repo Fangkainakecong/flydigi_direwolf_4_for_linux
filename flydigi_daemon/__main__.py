@@ -60,6 +60,8 @@ def build_parser():
                      help='直接指定 pitch 的 counts_per_degree（默认同 yaw）')
     cal.add_argument('--sign-yaw', type=int, choices=(1, -1), default=1)
     cal.add_argument('--sign-pitch', type=int, choices=(1, -1), default=1)
+    cal.add_argument('--strict', action='store_true',
+                     help='yaw/pitch 相差过大时直接失败，不用 pitch 兜底')
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 

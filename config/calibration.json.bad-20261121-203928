@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "source": "gesture",
+  "created": "2026-11-21T20:39:28",
+  "device": {
+    "vid": "045e",
+    "pid": "028e",
+    "uid": "cf536538",
+    "fw": "4.0.7.2"
+  },
+  "turns": 3,
+  "update_rate_hz": 70.6,
+  "yaw": {
+    "counts_per_degree": 0.2956922775666506,
+    "sign": 1,
+    "axis": "gyro_x",
+    "noise": 0.05476312932276843,
+    "measured": 0.255,
+    "raw_total": 275.01
+  },
+  "pitch": {
+    "counts_per_degree": 0.2956922775666506,
+    "sign": 1,
+    "axis": "gyro_y",
+    "noise": 0.0,
+    "measured": 0.788,
+    "raw_total": 70.95
+  },
+  "roll": {
+    "axis": "gyro_z",
+    "sign": 1,
+    "counts_per_degree": 0.2956922775666506,
+    "noise": 0.8762100691642949,
+    "note": "未单独标定，沿用 yaw 灵敏度"
+  }
+}

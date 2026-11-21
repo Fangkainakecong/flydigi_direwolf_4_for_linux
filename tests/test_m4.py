@@ -189,6 +189,23 @@ def test_constant_calibration():
     assert cal['source'] == 'estimate'
 
 
+def test_build_calibration_rejects_inconsistent():
+    still = samples([(0, 0, 0)] * 100)
+    yaw = samples([(90, 0, 0)] * 400)             # 1.0
+    pitch = samples([(0, -15, 0)] * 300)          # 0.5
+    try:
+        calibrate.build_calibration(still, yaw, pitch, strict=True)
+    except ValueError as exc:
+        assert '相差' in str(exc), exc
+    else:
+        raise AssertionError('--strict 应当拒绝不一致的标定')
+    cal = calibrate.build_calibration(still, yaw, pitch)
+    # 不一致时用 pitch 的尺度兜底
+    assert cal['source'] == 'gesture-pitch'
+    assert abs(cal['yaw']['counts_per_degree'] - 0.5) < 0.01
+    assert cal['consistency']['fallback'] is True
+
+
 def test_build_calibration_rejects_wrong_axis():
     still = samples([(0, 0, 0)] * 50)
     yaw = samples([(0, 80, 0)] * 400)             # 转到 pitch 去了

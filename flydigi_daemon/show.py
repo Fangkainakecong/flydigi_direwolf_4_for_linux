@@ -280,6 +280,8 @@ def run(cfg, args):
         cal_label = '已加载（更新率 %s Hz）' % cal.get('update_rate_hz', '?')
         if cal.get('source') == 'estimate':
             cal_label += '，估算值，建议重新标定'
+        elif cal.get('source') == 'gesture-pitch':
+            cal_label += '，yaw 圈数不足，采用 pitch 尺度'
     else:
         cal_label = '未标定（运行 calibrate 生成）'
     if not args.quiet:

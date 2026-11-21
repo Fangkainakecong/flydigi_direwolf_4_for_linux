@@ -96,8 +96,9 @@ sudo python3 -m flydigi_daemon calibrate
 ```
 
 按提示做三步：静置 3 秒 → 水平转 **3 整圈** → 低头约 90°。转完停住会
-自动结束；起停误差摊到 1080° 上，yaw/pitch 还会互相校验。产物是
-`config/calibration.json`（不进 git）。
+自动结束；起停误差摊到 1080° 上，yaw/pitch 还会互相校验。两者差得太多
+（通常是把圈数数少了）会改用低头 90° 的尺度兜底；`--strict` 则直接失败、
+不动原文件。产物是 `config/calibration.json`（不进 git）。
 
 官方 Space Station 的配置里只有体感目标/开关/死区/灵敏度（出厂 25/25、
 死区 8），**没有**物理标定；上游 openflydigi 也写明 Flydigi 的

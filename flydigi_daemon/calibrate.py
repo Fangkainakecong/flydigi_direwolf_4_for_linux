@@ -4,7 +4,8 @@
 （出厂 25/25、死区 8），**没有**陀螺仪的物理标定；上游 openflydigi 也明确
 写了 Flydigi 的 LSB-per-deg/s 没有参考值、只能按手感调。所以 counts/degree
 只能靠测：默认转 **3 整圈**，把起停误差摊到 1080° 上；yaw/pitch 的测量值
-会互相校验，并按角度加权合并。
+会互相校验，一致时按角度加权合并；差得太多（圈数没转够）就改用 pitch 的
+尺度兜底，`--strict` 则直接失败、保留原文件。
 
 也支持跳过动作、直接写常数（如果以后找到官方/数据表值）::
 
@@ -109,7 +110,8 @@ def update_rate(samples):
 
 
 def build_calibration(still, yaw_samples, pitch_samples, turns=1,
-                      degrees=(YAW_DEGREES, PITCH_DEGREES), meta=None):
+                      degrees=(YAW_DEGREES, PITCH_DEGREES), meta=None,
+                      strict=False):
     """从三段采样算出 calibration dict；转得不够就抛 ValueError。
 
     `turns` 是水平转的整圈数。yaw 和 pitch 各自算出 counts/degree 后，
@@ -133,12 +135,32 @@ def build_calibration(still, yaw_samples, pitch_samples, turns=1,
     yaw_total, yaw_scale = pick(yaw_samples, 0, turns * degrees[0])
     pitch_total, pitch_scale = pick(pitch_samples, 1, degrees[1])
 
+    yaw_measured = yaw_scale['counts_per_degree']
+    pitch_measured = pitch_scale['counts_per_degree']
+    ratio = max(yaw_measured, pitch_measured) / max(
+        1e-9, min(yaw_measured, pitch_measured))
+    fallback = ratio > 1.35
+    if fallback and strict:
+        raise ValueError(
+            'yaw/pitch 单独测量相差 %.0f%%（yaw %.3f / pitch %.3f）；'
+            '通常是一次动作没做完整。请重做水平 3 圈（不要中途停顿）'
+            '或低头 90°' % ((ratio - 1) * 100, yaw_measured, pitch_measured))
+
     yaw_degrees = turns * degrees[0]
-    pooled = (abs(yaw_total) + abs(pitch_total)) / (yaw_degrees + degrees[1])
+    if fallback:
+        # 圈数容易数错；低头 90° 只有一个终态，更好判断，用它兜底。
+        pooled = pitch_measured
+    else:
+        pooled = (abs(yaw_total) + abs(pitch_total)) / (yaw_degrees +
+                                                        degrees[1])
 
     cal = {
         'version': 1,
-        'source': 'gesture',
+        'source': 'gesture-pitch' if fallback else 'gesture',
+        'consistency': {'yaw': round(yaw_measured, 3),
+                        'pitch': round(pitch_measured, 3),
+                        'ratio': round(ratio, 2),
+                        'fallback': fallback},
         'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'device': meta or {},
         'turns': turns,
@@ -347,10 +369,11 @@ def run(cfg, args, calibration_path):
             meta = {'vid': '045e', 'pid': '028e',
                     'uid': info['uid'], 'fw': info['fw']}
         try:
-            cal = build_calibration(still, yaw, pitch, turns=turns, meta=meta)
+            cal = build_calibration(still, yaw, pitch, turns=turns, meta=meta,
+                                    strict=args.strict)
         except ValueError as exc:
             print('\n✗ 标定失败：%s' % exc)
-            print('  重新运行 calibrate，动作慢一点、幅度做足。')
+            print('  没有写入，原来的 calibration.json 保持不动。')
             return 2
 
         path = write_calibration(output, cal)
@@ -364,9 +387,11 @@ def run(cfg, args, calibration_path):
               % (pitch_m, cal['pitch']['sign'], cal['pitch']['noise']))
         print('  合并后 counts_per_degree = %.3f（按 %d° 与 90° 加权）'
               % (cal['yaw']['counts_per_degree'], total_degrees))
-        if ratio > 1.35:
-            print('⚠ yaw/pitch 单独测量相差 %.0f%%，已按角度加权；'
-                  '若手感不对，重做 90° 那一步。' % ((ratio - 1) * 100))
+        if cal.get('consistency', {}).get('fallback'):
+            print('⚠ yaw/pitch 单独测量相差 %.0f%%（yaw %.3f / pitch %.3f），'
+                  '水平圈数可能没转够；' % ((ratio - 1) * 100, yaw_m, pitch_m))
+            print('  已改用低头 90° 的尺度 %.3f。想重测水平：'
+                  'sudo ... calibrate --turns 1' % cal['yaw']['counts_per_degree'])
         print('\n桌面配置里 Home 切换体感组；灵敏度用 config/user.toml 调：')
         print('  [profile.desktop.axis.gyro_x]\n  sensitivity = 1.0')
         return 0
