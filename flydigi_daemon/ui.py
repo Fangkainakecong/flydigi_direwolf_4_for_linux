@@ -331,14 +331,27 @@ def make_handler(model):
 
 def run(cfg, args):
     model = build_model(cfg)
+    url = 'http://127.0.0.1:%d/' % args.port
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port),
                                      make_handler(model))
     except OSError as exc:
+        # 快捷方式重复点击时端口已占用：如果占用者就是本编辑器，直接开页面。
+        try:
+            import urllib.request
+            with urllib.request.urlopen(url + 'api/model', timeout=1) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+            if 'profiles' not in data:
+                raise ValueError('not our editor')
+            print('编辑器已在运行：%s' % url)
+            if not args.no_open:
+                webbrowser.open(url)
+            return 0
+        except Exception:                       # noqa: BLE001
+            pass
         print('启动失败（端口 %d）：%s' % (args.port, exc))
         print('换一个端口：python3 -m flydigi_daemon edit --port 8800')
         return 1
-    url = 'http://127.0.0.1:%d/' % args.port
     print('可视化编辑器: %s' % url)
     print('保存到: %s' % cfgmod.USER_PATH)
     print('Ctrl-C 停止')
