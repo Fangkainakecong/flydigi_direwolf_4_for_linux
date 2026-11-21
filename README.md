@@ -180,6 +180,51 @@ gamepad/desktop/media 的用途），每个物理键、每个轴（摇杆/扳机
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 
+## 自动启停（systemd，可选）
+
+先确认会选对设备（两个手柄都插着也能看出来）：
+
+```bash
+cd ~/projects/flydigi_direwolf_4_for_linux
+python3 -m flydigi_daemon devices
+```
+
+本机实测：
+
+```
+  1-1.2  Flydigi 2.4G Android   ← 黑武士2，不会接管
+* 2-1    Flydigi Direwolf 4     ← 只接管这个
+```
+
+安装后由 `flydigi-watch.service` 按需启动 `flydigi-dw4.service`：
+
+```bash
+sudo scripts/install_services.sh
+journalctl -u flydigi-watch -u flydigi-dw4 -f
+```
+
+行为：
+
+- 插入 dongle → 自动启动 daemon
+- 拔掉 dongle → 自动停止并恢复 xpad
+- 连续 **1 小时没有真实操作** → daemon 自己退出；watch 保留，下一次
+  按键/摇杆/扳机/体感转动时自动再启动
+- 冰原狼4 无线约 15 分钟休眠时：daemon 继续等（最多到 1 小时），输入超时
+  会先释放所有按键；1 小时后退出，醒来再按一下就会重新启动
+- `config/user.toml` 可改 `[daemon] idle_exit_s`（秒，0 = 不自动退出）
+
+### 和黑武士2 一起用
+
+- daemon 只认产品名含 `Direwolf 4` 的 USB 设备；黑武士2 的
+  `Flydigi 2.4G Android` 不匹配，永远走正常的 xpad，不经过本项目的映射。
+- 接管时优先 `USBDEVFS_DISCONNECT` / 只解绑本接口的 sysfs unbind；
+  只有**没有其它 xpad 手柄**时才会 `modprobe -r xpad`，所以不会把黑武士2
+  一起解绑。
+- 游戏里会看到两个标准 Xbox 手柄（虚拟冰原狼4 + 黑武士2），输入互不混；
+  如果游戏区分 1P/2P，按需要在游戏或 Steam 里调顺序。
+- 如果产品名不同，`devices` 会打印实际名字；把 `[device] product_hint`
+  改成能唯一定位 dongle 的字符串即可。
+
 ## 故障排查：Ctrl/Shift 卡住、鼠标左右键错乱
 
 如果是本项目的 daemon 造成的，它会在 400 ms 没有手柄输入时自动释放所有

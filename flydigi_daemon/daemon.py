@@ -21,7 +21,7 @@ from . import status as statusmod
 from . import usb
 from .devices import Devices, device_node, scan_event_nodes
 from .slots import SlotController
-from .translate import describe, translate
+from .translate import describe, significant_change, translate
 
 
 def _fmt_elapsed(seconds):
@@ -82,10 +82,12 @@ def _make_slots(cfg, persist=True, on_switch=None):
 def run_live(cfg, dry_run=False, seconds=None, profile=None,
              calibration=None):
     devcfg = cfgmod.device_section(cfg)
-    dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
+    dev = usb.find_pad(devcfg['vendor'], devcfg['product'],
+                       devcfg.get('product_hint'))
     if not dev:
-        print('未找到手柄（%04x:%04x）。确认 dongle 插好、手柄已开机。'
-              % (devcfg['vendor'], devcfg['product']))
+        print(usb.no_pad_message(devcfg['vendor'], devcfg['product'],
+                                 devcfg.get('product_hint')))
+        print('确认 dongle 插好、手柄已开机；插着别的手柄时也不会误接管。')
         return 1
 
     print('飞智 daemon（M3 映射）' + ('（dry-run，不建虚拟设备）' if dry_run else ''))
@@ -142,6 +144,8 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         safety = cfgmod.safety_section(cfg)
         watchdog = float(safety.get('watchdog_ms', 1500)) / 1000.0
         release_after = float(safety.get('input_timeout_ms', 400)) / 1000.0
+        idle_exit = float(cfgmod.daemon_section(cfg).get('idle_exit_s', 3600)
+                          or 0)
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
@@ -149,8 +153,15 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         gap_released = False
         prev = mapper.out
         prev_extras = frozenset()
+        prev_raw = None
+        last_activity = time.time()
         while flag['running']:
-            if seconds is not None and time.time() - t0 >= seconds:
+            now = time.time()
+            if seconds is not None and now - t0 >= seconds:
+                break
+            if idle_exit > 0 and now - last_activity >= idle_exit:
+                print('%.0f 分钟没有操作，daemon 退出'
+                      % (idle_exit / 60.0))
                 break
             got = pad.reap()
             if got is None:
@@ -198,6 +209,9 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             state = translate(data)
             if state is None:
                 continue
+            if significant_change(prev_raw, state):
+                last_activity = time.time()
+            prev_raw = state
             if state.extras != prev_extras and not dry_run:
                 added = state.extras - prev_extras
                 removed = prev_extras - state.extras

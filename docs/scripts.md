@@ -37,6 +37,17 @@ python3 -m flydigi_daemon release          # 释放当前按下的 XTEST 键/按
 python3 -m flydigi_daemon release --dry-run
 ```
 
+自动启停：
+
+```bash
+python3 -m flydigi_daemon devices       # 列出 045e:028e，标记会接管哪一个
+sudo scripts/install_services.sh        # 安装 flydigi-watch/flydigi-dw4
+sudo scripts/install_services.sh --remove
+journalctl -u flydigi-watch -u flydigi-dw4 -f
+```
+
+`flydigi-watch` 负责插拔/唤醒时启停；`flydigi-dw4` daemon 1 小时无操作退出。
+
 体感标定（需要手柄，约 15 秒）：
 
 ```bash

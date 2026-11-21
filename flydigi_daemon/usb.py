@@ -24,14 +24,19 @@
 """
 
 import ctypes
+import errno
 import glob
 import os
+import re
 import struct
 import subprocess
 import time
 
 VID, PID = 0x045E, 0x028E
-PRODUCT_HINT = "Flydigi Direwolf 4"
+# 空间站自己也靠产品字符串认 Direwolf 4：`045e:028e` 不是飞智独占，
+# 黑武士 2、Vader 等 XInput 手柄也会用这个 ID。默认只匹配产品名里的
+# "Direwolf 4"，避免把别的手柄当成冰原狼4。
+PRODUCT_HINT = "Direwolf 4"
 
 # ---- usbdevice_fs ioctl ---------------------------------------------------
 # 数值来自 /usr/include/linux/usbdevice_fs.h；用 libc 的 ioctl 直接传指针，
@@ -88,6 +93,25 @@ def status_name(status):
     }.get(abs(status), f'errno{abs(status)}')
 
 
+class PadBusyError(OSError):
+    """接口仍被 xpad 占用，而且系统里还有别的 Xbox 手柄。"""
+
+
+def _usb_ids(devpath):
+    """从 USB 设备描述符读 VID:PID；读不到时用配置里的默认值。"""
+    try:
+        fd = os.open(devpath, os.O_RDONLY)
+        try:
+            head = os.pread(fd, 18, 0)
+        finally:
+            os.close(fd)
+        if len(head) >= 18:
+            return struct.unpack_from('<HH', head, 8)
+    except OSError:
+        pass
+    return VID, PID
+
+
 class Pad(object):
     """独占一个 USB 接口的简单异步 URB 封装。
 
@@ -98,39 +122,71 @@ class Pad(object):
     def __init__(self, devpath, interface=0):
         self.devpath = devpath
         self.interface = interface
+        self.vendor, self.product = _usb_ids(devpath)
+        self.info = device_info(devpath, self.vendor, self.product)
         self.fd = os.open(devpath, os.O_RDWR)
         self.pending = {}
 
     # -- 驱动解绑 --------------------------------------------------------
     def disconnect_driver(self):
-        """让内核驱动（xpad）放开接口。
+        """只解绑当前接口的驱动（USBDEVFS_DISCONNECT）。
 
-        优先用 USBDEVFS_DISCONNECT，它只针对当前接口，不影响其它 USB 设备；
-        但实测这个 ioctl 在部分内核/设备上不可靠，所以失败（或随后 claim
-        仍然 EBUSY）时退回 `modprobe -r xpad`。返回实际使用的方法名。
+        这是首选路径，不会影响同一台机器上的黑武士2等其它 xpad 手柄。
+        `takeover()` 在 claim 仍失败时才考虑全局卸载 xpad。
         """
-        try:
-            _ioctl(self.fd, DISCONNECT)
-            return 'USBDEVFS_DISCONNECT'
-        except OSError:
-            pass
-        subprocess.run(['modprobe', '-r', 'xpad'], check=False)
-        time.sleep(0.3)
-        return 'modprobe -r xpad'
+        _ioctl(self.fd, DISCONNECT)
+        return 'USBDEVFS_DISCONNECT'
 
-    def takeover(self):
+    def other_xpad_devices(self):
+        """返回同一 xpad 驱动下、不属于本设备的接口名。"""
+        return xpad_other_interfaces(self.info, self.interface)
+
+    def takeover(self, allow_global_unload=None):
         """解绑驱动并 claim 接口，返回实际生效的方法名。
 
         探针脚本应该用这个，而不是自己拼 disconnect + claim：DISCONNECT
         返回 0 不代表驱动真的放手了，必须用 claim 的结果说话。
+
+        安全策略：只有**没有其它 xpad 手柄**时才允许 `modprobe -r xpad`。
+        否则宁可报错，也不把用户同时插着的黑武士2一起解绑。默认
+        `allow_global_unload=None` 会自动判断。
         """
-        method = self.disconnect_driver()
+        disconnected = False
+        method = None
+        try:
+            method = self.disconnect_driver()
+            disconnected = True
+        except OSError:
+            pass
         try:
             self.claim()
-            return method
-        except OSError as e:
-            if e.errno != 16:            # EBUSY：驱动还占着
+            return method or 'claim（xpad 未占用）'
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
                 raise
+
+        # 首选 sysfs 精准解绑：只动这个接口，不影响同时插着的黑武士2。
+        if unbind_xpad(self.info, self.interface):
+            disconnected = True
+            try:
+                self.claim()
+                return 'sysfs unbind（只解绑本接口）'
+            except OSError as exc:
+                if exc.errno != errno.EBUSY:
+                    raise
+
+        others = self.other_xpad_devices()
+        if allow_global_unload is None:
+            allow_global_unload = not others
+        if not allow_global_unload:
+            if disconnected:
+                self.reconnect_driver()
+            raise PadBusyError(
+                errno.EBUSY,
+                '无法独占冰原狼4：接口仍被 xpad 占用，而且系统里还有其它 '
+                'Xbox 手柄（%s）。为了不把其它手柄一起解绑，已拒绝全局卸载 '
+                'xpad。' % (', '.join(others) or '无法识别'))
+
         subprocess.run(['modprobe', '-r', 'xpad'], check=False)
         time.sleep(0.3)
         self.claim()
@@ -139,8 +195,14 @@ class Pad(object):
     def reconnect_driver(self):
         try:
             _ioctl(self.fd, CONNECT)
+            return
         except OSError:
-            subprocess.run(['modprobe', 'xpad'], check=False)
+            pass
+        # sysfs unbind 之后 USBDEVFS_CONNECT 不一定能重新 probe；优先只
+        # 把本接口绑回 xpad，避免影响其它手柄。
+        if bind_xpad(self.info, self.interface):
+            return
+        subprocess.run(['modprobe', 'xpad'], check=False)
 
     # -- 接口 ------------------------------------------------------------
     def claim(self):
@@ -220,18 +282,232 @@ class Pad(object):
         self.close()
 
 
-def find_pad(vid=VID, pid=PID):
-    """按 VID:PID 找 dongle 的 /dev/bus/usb/BBB/DDD。"""
-    for path in sorted(glob.glob('/dev/bus/usb/*/*')):
-        try:
-            fd = os.open(path, os.O_RDONLY)
-            head = os.pread(fd, 18, 0)
-            os.close(fd)
-        except OSError:
+def _read_text(path):
+    try:
+        with open(path, encoding='utf-8', errors='replace') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
+
+
+def _norm(text):
+    return ''.join(ch for ch in str(text).lower() if ch.isalnum())
+
+
+def _hint_matches(product, hint):
+    """产品名是否像配置里的提示；忽略空格/连字符/大小写。"""
+    product_norm = _norm(product)
+    hint_norm = _norm(hint)
+    if not hint_norm:
+        return True
+    if hint_norm in product_norm:
+        return True
+    # 允许产品名省略厂商名（例如只写 "Direwolf 4"）。厂商名和通用词
+    # 不参与匹配，但 "Direwolf" 和 "4" 必须同时出现，避免匹配到 3 代。
+    tokens = [tok for tok in re.findall(r'[a-z0-9]+', str(hint).lower())
+              if tok not in ('flydigi', 'usb', 'receiver', 'controller')]
+    return bool(tokens) and all(tok in product_norm for tok in tokens)
+
+
+def candidate_pads(vid=VID, pid=PID,
+                   devices_root='/sys/bus/usb/devices'):
+    """列出所有 VID:PID 匹配的 USB 设备（含产品字符串）。
+
+    用 sysfs 而不是挨个打开 `/dev/bus/usb/*`：非 root 也能读产品名，
+    而且能区分同样 `045e:028e` 的黑武士2、Vader 等设备。
+    """
+    out = []
+    for entry in sorted(glob.glob(os.path.join(devices_root, '*'))):
+        if not os.path.isdir(entry):
             continue
-        if len(head) >= 18 and struct.unpack_from('<HH', head, 8) == (vid, pid):
-            return path
+        try:
+            evid = int(_read_text(os.path.join(entry, 'idVendor')), 16)
+            epid = int(_read_text(os.path.join(entry, 'idProduct')), 16)
+        except ValueError:
+            continue
+        if (evid, epid) != (vid, pid):
+            continue
+        try:
+            bus = int(_read_text(os.path.join(entry, 'busnum')))
+            dev = int(_read_text(os.path.join(entry, 'devnum')))
+        except ValueError:
+            continue
+        name = os.path.basename(entry)
+        devpath = '/dev/bus/usb/%03d/%03d' % (bus, dev)
+        out.append({
+            'name': name,
+            'sysfs': os.path.realpath(entry),
+            'path': devpath if os.path.exists(devpath) else None,
+            'bus': bus,
+            'dev': dev,
+            'vendor': vid,
+            'product_id': pid,
+            'product': _read_text(os.path.join(entry, 'product')),
+            'manufacturer': _read_text(os.path.join(entry, 'manufacturer')),
+            'serial': _read_text(os.path.join(entry, 'serial')),
+        })
+    return out
+
+
+def choose_pad(candidates, product_hint=PRODUCT_HINT):
+    """从候选里挑出冰原狼4，返回 `(info | None, 原因)`。
+
+    产品名匹配不唯一时宁可失败，也不猜。这样插着黑武士2时，即使它也是
+    `045e:028e`，也不会被 daemon 接管。
+    """
+    hint = (product_hint or '').strip()
+    if not candidates:
+        return None, '未找到 %04x:%04x 设备' % (VID, PID)
+    if hint:
+        matched = [c for c in candidates if _hint_matches(c['product'], hint)]
+        if len(matched) == 1:
+            chosen = matched[0]
+            if not chosen.get('path'):
+                return None, ('找到 %s（%s），但没有 %s；检查 USB 权限。'
+                              % (chosen['name'], chosen['product'] or '?',
+                                 chosen['path'] or '设备节点'))
+            return chosen, ''
+        if len(matched) > 1:
+            return None, ('找到 %d 个产品名都像 %r 的设备，无法区分：%s'
+                          % (len(matched), hint,
+                             ', '.join('%s(%s)' % (c['name'], c['product'])
+                                       for c in matched)))
+        return None, ('找到 %d 个 %04x:%04x，但产品名都不含 %r。'
+                      '如果冰原狼4 的产品名不同，请改 [device] product_hint。'
+                      % (len(candidates), VID, PID, hint))
+    if len(candidates) == 1:
+        chosen = candidates[0]
+        if not chosen.get('path'):
+            return None, '找到 %s，但没有 USB 设备节点。' % chosen['name']
+        return chosen, ''
+    return None, ('找到 %d 个 %04x:%04x，未配置 product_hint，无法区分：%s'
+                  % (len(candidates), VID, PID,
+                     ', '.join('%s(%s)' % (c['name'], c['product'])
+                               for c in candidates)))
+
+
+def find_pad_info(vid=VID, pid=PID, product_hint=PRODUCT_HINT):
+    chosen, _reason = choose_pad(candidate_pads(vid, pid), product_hint)
+    return chosen
+
+
+def find_pad(vid=VID, pid=PID, product_hint=PRODUCT_HINT):
+    """按 VID:PID + 产品名找冰原狼4 的 /dev/bus/usb/BBB/DDD。"""
+    chosen = find_pad_info(vid, pid, product_hint)
+    return chosen['path'] if chosen else None
+
+
+def no_pad_message(vid=VID, pid=PID, product_hint=PRODUCT_HINT):
+    """给 check/run/calibrate 用的失败说明，列出实际看到的产品名。"""
+    candidates = candidate_pads(vid, pid)
+    _chosen, reason = choose_pad(candidates, product_hint)
+    lines = [reason]
+    if candidates:
+        lines.append('当前 %04x:%04x 设备：' % (vid, pid))
+        for c in candidates:
+            lines.append('  %s  %s  %s' % (
+                c['name'], c['product'] or '(无产品名)',
+                c['path'] or '(无 /dev 节点)'))
+    return '\n'.join(lines)
+
+
+def device_info(devpath, vid=VID, pid=PID):
+    """`/dev/bus/usb/001/004` → sysfs 候选信息。"""
+    for c in candidate_pads(vid, pid):
+        if c.get('path') == devpath:
+            return c
     return None
+
+
+def xpad_other_interfaces(info, interface=0,
+                          driver_root='/sys/bus/usb/drivers/xpad'):
+    """xpad 驱动下、不属于 info 所代表 USB 设备的接口名。
+
+    全局 `modprobe -r xpad` 会同时解绑这些设备；调用方据此决定是否允许。
+    info 为 None 时无法排除目标本身，保守地返回全部。
+    """
+    try:
+        entries = sorted(os.listdir(driver_root))
+    except OSError:
+        return []
+    target = os.path.realpath(info['sysfs']) if info and info.get('sysfs') else None
+    out = []
+    for entry in entries:
+        real = os.path.realpath(os.path.join(driver_root, entry))
+        if target and (real == target or real.startswith(target + os.sep)):
+            continue
+        out.append(entry)
+    return out
+
+
+def find_event_nodes(info, input_root='/sys/class/input'):
+    """找属于这个 USB 设备的 /dev/input/eventN。
+
+    用 sysfs 祖先路径匹配，不靠设备名：黑武士2和虚拟 Xbox 手柄都可能叫
+    "Microsoft X-Box 360 pad"。daemon 停下后 xpad 会重新建节点，supervise
+    用它来检测"手柄被唤醒/有操作"。
+    """
+    if not info or not info.get('sysfs'):
+        return []
+    target = os.path.realpath(info['sysfs'])
+    out = []
+    try:
+        entries = sorted(os.listdir(input_root))
+    except OSError:
+        return out
+    for entry in entries:
+        if not entry.startswith('event'):
+            continue
+        real = os.path.realpath(os.path.join(input_root, entry, 'device'))
+        if real == target or real.startswith(target + os.sep):
+            out.append('/dev/input/' + entry)
+    return out
+
+
+def event_name(path):
+    try:
+        with open(os.path.join('/sys/class/input', os.path.basename(path),
+                               'device', 'name'), encoding='utf-8') as f:
+            return f.read().strip()
+    except OSError:
+        return ''
+
+
+def unbind_xpad(info, interface=0,
+                driver_root='/sys/bus/usb/drivers/xpad'):
+    """只把目标接口从 xpad 解绑（写 sysfs unbind）。
+
+    和 `modprobe -r xpad` 不同：这个只影响冰原狼4 的接口，不会碰到同时
+    插着的黑武士2。root 才能写；找不到接口说明本来就没绑定。
+    """
+    if not info or not info.get('name'):
+        return False
+    name = '%s:1.%d' % (info['name'], interface)
+    if not os.path.exists(os.path.join(driver_root, name)):
+        return True
+    try:
+        with open(os.path.join(driver_root, 'unbind'), 'w') as f:
+            f.write(name)
+    except OSError:
+        return False
+    return not os.path.exists(os.path.join(driver_root, name))
+
+
+def bind_xpad(info, interface=0,
+              driver_root='/sys/bus/usb/drivers/xpad'):
+    """尝试把目标接口重新绑到 xpad（只影响这个设备）。"""
+    if not info or not info.get('name'):
+        return False
+    name = '%s:1.%d' % (info['name'], interface)
+    if os.path.exists(os.path.join(driver_root, name)):
+        return True
+    bind = os.path.join(driver_root, 'bind')
+    try:
+        with open(bind, 'w') as f:
+            f.write(name)
+    except OSError:
+        return False
+    return os.path.exists(os.path.join(driver_root, name))
 
 
 # ---- 老方言 ---------------------------------------------------------------

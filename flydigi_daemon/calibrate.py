@@ -311,9 +311,11 @@ def run(cfg, args, calibration_path):
         print('  python3 -m flydigi_daemon calibrate --estimate')
         return 1
     devcfg = cfgmod.device_section(cfg)
-    dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
+    dev = usb.find_pad(devcfg['vendor'], devcfg['product'],
+                       devcfg.get('product_hint'))
     if not dev:
-        print('未找到手柄（045e:028e）')
+        print(usb.no_pad_message(devcfg['vendor'], devcfg['product'],
+                                 devcfg.get('product_hint')))
         return 1
     print('手柄: %s' % dev)
 

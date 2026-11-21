@@ -74,10 +74,12 @@ def print_audit(slot, audit):
 
 def run(cfg, deep=True):
     devcfg = cfgmod.device_section(cfg)
-    dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
+    dev = usb.find_pad(devcfg['vendor'], devcfg['product'],
+                       devcfg.get('product_hint'))
     if not dev:
-        print('未找到手柄（%04x:%04x）。确认 dongle 插好、手柄已开机。'
-              % (devcfg['vendor'], devcfg['product']))
+        print(usb.no_pad_message(devcfg['vendor'], devcfg['product'],
+                                 devcfg.get('product_hint')))
+        print('确认 dongle 插好、手柄已开机；插着别的手柄时也不会误接管。')
         return 1
     if not deep:
         print('设备: %s（--no-deep，未接管）' % dev)

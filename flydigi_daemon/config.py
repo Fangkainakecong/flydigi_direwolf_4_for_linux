@@ -112,6 +112,9 @@ def device_section(cfg):
         'vendor': int(dev.get('vendor', 0x045E)),
         'product': int(dev.get('product', 0x028E)),
         'interface': int(dev.get('interface', 0)),
+        # 045e:028e 不是飞智独占：黑武士2等 XInput 手柄也用这个 ID。
+        # 只接管产品名含这个字符串的设备；留空 = 只接受唯一候选。
+        'product_hint': str(dev.get('product_hint', 'Direwolf 4') or ''),
     }
 
 

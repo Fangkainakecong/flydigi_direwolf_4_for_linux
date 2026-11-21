@@ -29,11 +29,18 @@ suppress_chord = true
 state_file = ""
 # daemon 写入的电量/固件状态文件；留空 = 和 state_file 同目录的 status.json。
 status_file = ""
+# 超过这个时间没有任何有效操作就自动退出（0 = 不自动退出）。
+# supervise/systemd 会保留一个很轻的监视进程，等下次按键/摇杆/体感操作再启动。
+idle_exit_s = 3600
 
 [device]
 vendor = 0x045e
 product = 0x028e
 interface = 0
+# 重要：045e:028e 不是飞智独占，黑武士2等 XInput 手柄也是这个 ID。
+# 只接管产品名匹配这个字符串的设备（忽略大小写/空格）；留空 = 只接受唯一候选。
+# 如果 `check` 提示找不到，把它的提示里冰原狼4的产品名填到这里。
+product_hint = "Direwolf 4"
 
 [virtual.keyboard]
 name = "Flydigi DW4 Virtual Keyboard"

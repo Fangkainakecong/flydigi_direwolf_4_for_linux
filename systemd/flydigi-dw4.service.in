@@ -1,0 +1,18 @@
+[Unit]
+Description=Flydigi Direwolf 4 mapping daemon
+After=multi-user.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=/usr/bin/python3 -m flydigi_daemon run
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=12
+
+[Install]
+WantedBy=multi-user.target

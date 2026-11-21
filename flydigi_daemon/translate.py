@@ -77,6 +77,29 @@ def translate(data):
     )
 
 
+def significant_change(prev, cur):
+    """这一帧是否算“用户操作”，用于 1 小时空闲自动退出。
+
+    不能直接用 `prev != cur`：摇杆/扳机/体感都有微小噪声，静止时也会
+    偶尔差 1。按钮/十字键精确比较；摇杆和扳机要超过阈值；体感看绝对值
+    （角速度 > 约 18°/s），静止漂移不会把空闲计时一直续上。
+    """
+    if prev is None or cur is None:
+        return cur is not None
+    if (cur.buttons != prev.buttons or cur.extras != prev.extras
+            or cur.hat != prev.hat):
+        return True
+    for old, new in zip(prev.axes, cur.axes):
+        if abs(old - new) >= 96:
+            return True
+    for old, new in zip(prev.triggers, cur.triggers):
+        if abs(old - new) >= 8:
+            return True
+    if max(abs(v) for v in cur.gyro) >= 12:
+        return True
+    return False
+
+
 def describe(prev, cur):
     """人类可读的差异；完全相同返回空字符串。
 

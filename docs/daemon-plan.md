@@ -691,7 +691,7 @@ python3 -m venv .venv && .venv/bin/pip install evdev
 | **M3** | 映射引擎 + TOML + lint + 回放 | 任意按钮→任意目标；回放断言通过；CPU < 5% |
 | **M4** | 摇杆/体感→鼠标、扳机→滚轮、Home 开关、标定 | 桌面全局可移动/点击/滚动；360° 标定可复现 |
 | **M5** | FF_RUMBLE 透传 | 游戏震动正常；延迟 p99 < 5 ms；停止无残留 |
-| **M6** | systemd/udev/热插拔/延迟测试 | 拔插自动恢复；`systemctl restart` 无卡键 |
+| **M6** | systemd/热插拔/延迟测试 | 拔插自动恢复；`systemctl restart` 无卡键（已提供 watch + 服务模板） |
 | **M7** | 文档、脚本目录、回归、推送 | README/脚本说明齐全；CI 回放通过 |
 
 每个阶段的验收命令都写进 `docs/scripts.md`，避免"跑过了但不知道怎么复现"。

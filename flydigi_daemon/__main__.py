@@ -65,6 +65,14 @@ def build_parser():
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 
+    dev = sub.add_parser('devices',
+                         help='列出 045e:028e 手柄并显示会选哪一个')
+    dev.add_argument('--config', default=None)
+
+    watch = sub.add_parser('watch',
+                           help='按需启动/停止 daemon（root，systemd）')
+    watch.add_argument('--config', default=None)
+
     rel = sub.add_parser('release',
                          help='释放 XTEST 卡住的按键/鼠标按钮（通用清理）')
     rel.add_argument('--dry-run', action='store_true',
@@ -107,6 +115,32 @@ def main(argv=None):
         if args.cmd == 'calibrate':
             from .calibrate import run as calibrate_run
             return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
+        if args.cmd == 'devices':
+            from . import usb
+            devcfg = cfgmod.device_section(cfg)
+            candidates = usb.candidate_pads(devcfg['vendor'],
+                                            devcfg['product'])
+            chosen, reason = usb.choose_pad(candidates,
+                                            devcfg.get('product_hint'))
+            print('VID:PID %04x:%04x  product_hint=%r'
+                  % (devcfg['vendor'], devcfg['product'],
+                     devcfg.get('product_hint')))
+            for c in candidates:
+                mark = '*' if chosen and c['name'] == chosen['name'] else ' '
+                print('%s %-8s %-28s serial=%r  %s'
+                      % (mark, c['name'], c['product'] or '(无产品名)',
+                         c['serial'] or '', c['path'] or '(无节点)'))
+                nodes = usb.find_event_nodes(c)
+                if nodes:
+                    print('    input: %s' % ' '.join(nodes))
+            if chosen:
+                print('→ 会接管: %s (%s)' % (chosen['name'], chosen['product']))
+            else:
+                print('→ 不会接管: %s' % reason)
+            return 0
+        if args.cmd == 'watch':
+            from .watch import run as watch_run
+            return watch_run(cfg)
         if args.cmd == 'release':
             from .xrelease import run as release_run
             return release_run(args)
