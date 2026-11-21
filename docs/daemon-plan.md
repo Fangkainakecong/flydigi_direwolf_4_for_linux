@@ -814,7 +814,12 @@ jstest /dev/input/jsN
 - 启动前和 `check` 都会 lint；有错误直接退出码 2，warnings 只提示
 - `--profile NAME` 可临时指定 profile（回放/排查用，不读 `state.json`）
 - 组合键先按修饰键、后按普通键，松开反序；多来源映射同一目标自动去重
-- 尚未包含：宏、`turbo` 连发（M3b）、体感轴（M4）
+- `config/user.toml` 覆盖层：深合并到 `default.toml`，只写想改的键；
+  模板 `config/user.example.toml`，不进 git
+- `show`：终端打印四套映射表；`show --html [--open]` 生成自包含
+  `config/mappings.html`（四槽分页、按钮卡片 + 轴参数）
+- 尚未包含：宏（按需再做）；**连发/涡轮由板载固件负责，daemon 不做**
+- 体感轴（`gyro_x/gyro_y`）留到 M4
 
 - 验收：任意按钮映射到任意目标；`.bin` 回放断言通过
 

@@ -1,0 +1,16 @@
+# 个人映射覆盖层（复制为 config/user.toml 后修改）
+#
+# 只写想改的键，daemon 会和 config/default.toml 深合并：
+#
+#   [profile.desktop]
+#   a = "key:f"
+#   home = "none"
+#
+# 改完检查并预览：
+#   python3 -m flydigi_daemon show
+#   python3 -m flydigi_daemon check
+#
+# 注意：
+# * 轴条目要整条重写，例如 [profile.desktop.axis.lx] 的 target 想换，
+#   就把整段抄过来改；没写的字段仍然用默认值。
+# * 不要在 user.toml 里改 [virtual.*] 的设备名/VID:PID，Steam 靠它识别。

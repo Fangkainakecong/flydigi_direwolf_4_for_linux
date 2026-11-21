@@ -6,3 +6,7 @@ state.json
 
 # 从 Windows 拿过来的厂商文件：只读，不入库
 windows-dump/
+
+# 个人配置覆盖层
+config/user.toml
+config/mappings.html

@@ -38,8 +38,10 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
 - ✅ **M2 硬件验收通过**：四槽切换、吞键、`state.json` 记忆均正常
 - 🟡 **M3 代码完成，待硬件验收**：映射 DSL（按钮/轴 → 手柄、键盘、鼠标、
   滚轮、组开关），`SELECT+ABXY` 之上叠加 per-profile 映射；
-  `tests/test_m3.py` 20 项离线全过
-- ⏳ 宏 / turbo 连发（M3b）、体感→鼠标（M4）、FF 透传（M5）尚未实现
+  新增 `config/user.toml` 个人覆盖层和 `show` 可视化；
+  `tests/test_m3.py` + `tests/test_show.py` 共 24 项离线全过
+- ⏳ 体感→鼠标（M4）、FF 透传（M5）尚未实现；宏按需再加
+  （**连发由板载负责**，daemon 不做软件连发）
 
 ### 快速开始
 
@@ -50,7 +52,41 @@ sudo python3 -m flydigi_daemon run       # 独占手柄；另开终端 evtest / 
 python3 -m flydigi_daemon run --replay captures/xxx.bin --dry-run   # 无手柄回放
 python3 -m flydigi_daemon run --replay captures/xxx.bin --dry-run --profile desktop
 python3 tests/test_m1.py && python3 tests/test_m2.py && python3 tests/test_m3.py
+python3 tests/test_show.py
 ```
+
+### 自定义映射
+
+不要直接改 `config/default.toml`（它随仓库更新）。复制模板，只写想改的键：
+
+```bash
+cp config/user.example.toml config/user.toml
+```
+
+```toml
+# config/user.toml：深合并，没写的键继续用 default.toml
+[profile.desktop]
+a = "key:f"
+home = "none"
+
+[profile.desktop.axis.lx]
+target = "keypair"
+neg = "key:a"
+pos = "key:d"
+deadzone = 0.35
+```
+
+改完先看效果，再启动：
+
+```bash
+python3 -m flydigi_daemon show                # 终端里的四套配置表
+python3 -m flydigi_daemon show --html --open  # 生成并打开可视化页面
+sudo python3 -m flydigi_daemon check          # 校验 + 板载槽审计
+sudo python3 -m flydigi_daemon run
+```
+
+`show --html` 生成 `config/mappings.html`（自包含单文件，不进 git），
+四个槽各一页，按钮卡片 + 轴参数表，改完重新生成即可。
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 

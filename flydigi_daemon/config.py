@@ -1,7 +1,8 @@
-"""读 `config/default.toml`
+"""读配置：`config/default.toml` + 可选的 `config/user.toml`
 
-M1 只真正用 `[device]`、`[virtual.*]`、`[safety]` 三块；
-`[daemon]` 的四槽和 `[profile.*]` 的映射留给 M2/M3，先只做结构检查。
+`default.toml` 是带注释的样例（会随仓库更新）；自己的改动写进
+`config/user.toml`，启动时做**深合并**，只覆盖写到的键，不会丢掉默认值。
+`config/user.toml` 不进 git，模板见 `config/user.example.toml`。
 """
 
 import os
@@ -11,20 +12,42 @@ import tomli
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PATH = os.path.join(ROOT, 'config', 'default.toml')
+USER_PATH = os.path.join(ROOT, 'config', 'user.toml')
+_UNSET = object()
 
 
-def load(path=None):
-    path = path or DEFAULT_PATH
+def _read_toml(path):
     try:
         with open(path, 'rb') as f:
-            cfg = tomli.load(f)
+            data = tomli.load(f)
     except FileNotFoundError:
         sys.exit('找不到配置文件：%s' % path)
     except tomli.TOMLDecodeError as exc:
         sys.exit('配置语法错误（%s）：%s' % (path, exc))
-
-    if not isinstance(cfg, dict):
+    if not isinstance(data, dict):
         sys.exit('配置根节点必须是表：%s' % path)
+    return data
+
+
+def merge(base, extra):
+    """深合并：表递归合并，其它类型整体替换。"""
+    out = dict(base)
+    for key, value in extra.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def load(path=None, user_path=_UNSET):
+    """读配置。`path=None` 时才叠加 `config/user.toml`。"""
+    base_path = path or DEFAULT_PATH
+    cfg = _read_toml(base_path)
+    if user_path is _UNSET:
+        user_path = USER_PATH if path is None else None
+    if user_path and os.path.exists(user_path):
+        cfg = merge(cfg, _read_toml(user_path))
     if cfg.get('version') != 1:
         print('⚠ 配置 version=%r，本程序按 version=1 解释'
               % (cfg.get('version'),), file=sys.stderr)

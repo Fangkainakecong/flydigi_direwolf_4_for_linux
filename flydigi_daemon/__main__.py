@@ -7,6 +7,7 @@
 """
 
 import argparse
+import os
 import sys
 
 from . import config as cfgmod
@@ -38,6 +39,15 @@ def build_parser():
                    help='回放最多处理多少帧')
     r.add_argument('--profile', default=None,
                    help='临时用指定 profile 启动（不读 state.json）')
+
+    sh = sub.add_parser('show', help='打印映射表 / 生成可视化 HTML')
+    sh.add_argument('--config', default=None)
+    sh.add_argument('--profile', default=None, help='只看某个 profile')
+    sh.add_argument('--html', nargs='?', default=None,
+                    const=os.path.join(cfgmod.ROOT, 'config', 'mappings.html'),
+                    help='生成单文件 HTML（默认 config/mappings.html）')
+    sh.add_argument('--open', action='store_true', help='生成后用浏览器打开')
+    sh.add_argument('--quiet', action='store_true', help='不打印终端表格')
     return ap
 
 
@@ -46,8 +56,9 @@ def main(argv=None):
     cfg = cfgmod.load(args.config)
 
     errors, warnings = mapping.lint_config(cfg)
-    for warning in warnings:
-        print('⚠ %s' % warning)
+    if args.cmd != 'show':
+        for warning in warnings:
+            print('⚠ %s' % warning)
     if errors:
         print('✗ 配置有 %d 处错误，先修好再启动：' % len(errors))
         for error in errors:
@@ -55,6 +66,9 @@ def main(argv=None):
         return 2
 
     try:
+        if args.cmd == 'show':
+            from .show import run as show_run
+            return show_run(cfg, args)
         if args.cmd == 'check':
             from .check import run
             return run(cfg, deep=not args.no_deep)

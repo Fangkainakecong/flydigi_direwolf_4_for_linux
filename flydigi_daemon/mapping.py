@@ -673,3 +673,94 @@ def _key_names(codes):
         name = ecodes.bytype[ecodes.EV_KEY].get(code, str(code))
         names.append(name)
     return names
+
+
+# ---------------------------------------------------------------------------
+# 展示用格式化（show 命令）
+# ---------------------------------------------------------------------------
+_KEY_DISPLAY = {
+    ecodes.KEY_LEFTCTRL: 'ctrl', ecodes.KEY_RIGHTCTRL: 'rightctrl',
+    ecodes.KEY_LEFTSHIFT: 'shift', ecodes.KEY_RIGHTSHIFT: 'rightshift',
+    ecodes.KEY_LEFTALT: 'alt', ecodes.KEY_RIGHTALT: 'rightalt',
+    ecodes.KEY_LEFTMETA: 'meta', ecodes.KEY_RIGHTMETA: 'rightmeta',
+    ecodes.KEY_ESC: 'esc', ecodes.KEY_SPACE: 'space',
+    ecodes.KEY_ENTER: 'enter', ecodes.KEY_BACKSPACE: 'backspace',
+    ecodes.KEY_TAB: 'tab', ecodes.KEY_PAGEUP: 'pageup',
+    ecodes.KEY_PAGEDOWN: 'pagedown',
+}
+
+
+def key_name(code):
+    if code in _KEY_DISPLAY:
+        return _KEY_DISPLAY[code]
+    name = ecodes.bytype[ecodes.EV_KEY].get(code)
+    if isinstance(name, (list, tuple)):
+        name = name[0] if name else None
+    if not name:
+        return 'code%d' % code
+    return name[4:].lower() if name.startswith('KEY_') else name.lower()
+
+
+_MOUSE_NAMES = {v: k for k, v in MOUSE_BUTTONS.items()}
+
+
+def format_target(target, short=False):
+    kind = target.kind
+    if kind == 'none':
+        return '—' if short else 'none'
+    if kind == 'pad':
+        return target.value.upper() if short else 'xbox:' + target.value
+    if kind == 'key':
+        combo = '+'.join(key_name(code) for code in target.value)
+        return combo if short else 'key:' + combo
+    if kind == 'mouse_button':
+        name = _MOUSE_NAMES.get(target.value, str(target.value))
+        if short:
+            return {'left': '左键', 'right': '右键', 'middle': '中键',
+                    'side': '侧键', 'extra': '附加键'}.get(name, name)
+        return 'mouse:' + name
+    if kind == 'mouse_move':
+        if short:
+            return '鼠标←→' if target.value == 'x' else '鼠标↑↓'
+        return 'mouse:' + target.value
+    if kind == 'wheel':
+        return ('滚轮↑' if target.value > 0 else '滚轮↓') if short \
+            else 'wheel:' + ('up' if target.value > 0 else 'down')
+    if kind == 'toggle':
+        if short:
+            return '体感开关' if target.value == 'gyro' else '开关:' + target.value
+        return 'toggle:' + target.value
+    if kind == 'keypair':
+        return 'keypair'
+    return kind
+
+
+def describe_axis(rule, short=False):
+    if rule.target.kind == 'keypair':
+        if short:
+            return '%s ⇄ %s' % (format_target(rule.neg, True),
+                                format_target(rule.pos, True))
+        return 'keypair：负 %s / 正 %s（死区 %.2f）' % (
+            format_target(rule.neg), format_target(rule.pos), rule.deadzone)
+    base = format_target(rule.target, short)
+    if short:
+        return base
+    params = []
+    if rule.target.kind == 'mouse_move':
+        params.append('死区 %.2f' % rule.deadzone)
+        if rule.curve != 1.0:
+            params.append('曲线 %.1f' % rule.curve)
+        params.append('速度 %d px/s' % rule.max_speed)
+    elif rule.target.kind == 'wheel':
+        params.append('阈值 %.2f' % rule.threshold)
+        params.append('释放 %.2f' % rule.release_threshold)
+        if rule.repeat_hz:
+            params.append('连发 %g Hz' % rule.repeat_hz)
+    elif rule.target.kind in ('key', 'mouse_button'):
+        params.append('阈值 %.2f' % rule.threshold)
+    elif rule.target.kind == 'pad_axis':
+        if rule.invert:
+            params.append('反向')
+    if rule.group:
+        params.append('组:%s' % rule.group)
+    return base + ('（%s）' % ', '.join(params) if params else '')

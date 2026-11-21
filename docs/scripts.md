@@ -16,7 +16,19 @@ python3 -m flydigi_daemon run --replay captures/x.bin --dry-run  # 无手柄回�
 python3 tests/test_m1.py                 # 离线回归（报文 → 状态）
 python3 tests/test_m2.py                 # 离线回归（SELECT+ABXY 四槽仲裁）
 python3 tests/test_m3.py                 # 离线回归（映射 DSL）
+python3 tests/test_show.py               # 映射可视化 / user.toml 覆盖
 ```
+
+配置预览与可视化：
+
+```bash
+python3 -m flydigi_daemon show            # 终端四套映射表
+python3 -m flydigi_daemon show --profile desktop
+python3 -m flydigi_daemon show --html --open   # config/mappings.html
+```
+
+个人改动写 `config/user.toml`（模板 `config/user.example.toml`），
+daemon 启动时深合并；`config/mappings.html` 和 `user.toml` 都不进 git。
 
 `run --profile desktop` 可以临时用某套配置启动（不读 `state.json`），
 配合 `--replay --dry-run` 可以在没有手柄时检查映射结果：
