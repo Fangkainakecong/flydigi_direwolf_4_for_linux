@@ -180,12 +180,12 @@ def test_build_calibration_three_turns_and_pooling():
 
 
 def test_constant_calibration():
-    cal = calibrate.constant_calibration(13.4, sign_pitch=-1,
+    cal = calibrate.constant_calibration(0.67, sign_pitch=-1,
                                          source='estimate')
     assert mapping.calibration_axis(cal, 'gyro_x') == {
-        'counts_per_degree': 13.4, 'sign': 1.0}
+        'counts_per_degree': 0.67, 'sign': 1.0}
     assert mapping.calibration_axis(cal, 'gyro_y') == {
-        'counts_per_degree': 13.4, 'sign': -1.0}
+        'counts_per_degree': 0.67, 'sign': -1.0}
     assert cal['source'] == 'estimate'
 
 

@@ -8,7 +8,7 @@
 
 也支持跳过动作、直接写常数（如果以后找到官方/数据表值）::
 
-    calibrate --set-yaw 13.4 --set-pitch 13.4 --sign-pitch -1
+    calibrate --set-yaw 0.67 --set-pitch 0.67 --sign-pitch -1
     calibrate --estimate       # 用 2026-11-19 的 45° 抓包估算值，仅作起步
 
 产物 `config/calibration.json`（不进 git）保存：
@@ -39,10 +39,10 @@ YAW_DEGREES = 360.0
 PITCH_DEGREES = 90.0
 DEFAULT_TURNS = 3
 
-# 从 data/txt/motion_20261119-003907.txt 的 A3 阶段估算：
-# yaw 左右各 45°（共 90°），积分约 1206 raw·s -> 13.4 raw·s/°。
-# 动作角度没有量具，误差可能 ±20%，只适合当"不想标定"的起步值。
-ESTIMATED_COUNTS_PER_DEGREE = 13.4
+# 2026-11-21 的 3 圈标定：yaw 0.654、pitch 0.687 raw·s/°，两者差 5%，
+# 说明这个尺度自洽。旧的 45° 抓包不可靠（三轴积分几乎一样，动作里混了
+# 滚转/俯仰），当时算出的 13.4 是错的。0.67 只适合当"不想标定"的起步值。
+ESTIMATED_COUNTS_PER_DEGREE = 0.67
 
 
 @dataclass
@@ -269,7 +269,7 @@ def run(cfg, args, calibration_path):
                                        ESTIMATED_COUNTS_PER_DEGREE,
                                        args.sign_yaw, args.sign_pitch,
                                        source='estimate')
-            note = ('2026-11-19 抓包估算值，约 ±20%；'
+            note = ('2026-11-21 三次整圈标定，约 ±10%；'
                     '手感不对就重跑 calibrate')
         path = write_calibration(output, cal)
         print('✓ 已写入 %s（%s）' % (path, note))
@@ -310,7 +310,7 @@ def run(cfg, args, calibration_path):
             print('只收到 %d 帧，检查连接后重试' % len(still))
             return 1
         noise = [rms([s.gyro[axis] for s in still]) for axis in range(3)]
-        threshold = max(2.0, max(noise) * 3.0)
+        threshold = max(1.0, max(noise) * 1.5)
         print('  噪声 RMS: yaw %.2f  pitch %.2f  roll %.2f（阈值 %.1f）'
               % (noise[0], noise[1], noise[2], threshold))
 
@@ -325,8 +325,12 @@ def run(cfg, args, calibration_path):
             print('只记录到 %.1f 秒，动作可能没识别到；重试一次。'
                   % (yaw[-1].t - yaw[0].t if len(yaw) > 1 else 0))
             return 2
+        yaw_duration = yaw[-1].t - yaw[0].t
         print('  记录 %.1f 秒，角速度更新率约 %.1f Hz'
-              % (yaw[-1].t - yaw[0].t, update_rate(yaw)))
+              % (yaw_duration, update_rate(yaw)))
+        if yaw_duration >= args.yaw_seconds - 0.3:
+            print('  ⚠ 到达最长采样时间，可能还没转完；下次可以 --yaw-seconds 30 '
+                  '或稍微转快一点。')
 
         print('\n[3/3] 从水平位置慢慢低头到大约 90°（手柄前端朝下），'
               '然后停住。')

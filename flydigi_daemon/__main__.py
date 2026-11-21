@@ -48,8 +48,8 @@ def build_parser():
                      help='静置采样秒数（默认 3）')
     cal.add_argument('--turns', type=int, default=3,
                      help='水平转几整圈（默认 3，越大越准）')
-    cal.add_argument('--yaw-seconds', type=float, default=14.0,
-                     help='水平旋转最长采样时间（默认 14 秒，停住会自动结束）')
+    cal.add_argument('--yaw-seconds', type=float, default=20.0,
+                     help='水平旋转最长采样时间（默认 20 秒，停住会自动结束）')
     cal.add_argument('--pitch-seconds', type=float, default=6.0,
                      help='俯仰最长采样时间（默认 6 秒）')
     cal.add_argument('--estimate', action='store_true',

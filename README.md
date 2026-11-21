@@ -108,7 +108,7 @@ LSB-per-deg/s 没有参考值。所以 counts/degree 只能测，或手动给常
 python3 -m flydigi_daemon calibrate --estimate
 
 # 以后拿到官方/数据表值，直接写
-python3 -m flydigi_daemon calibrate --set-yaw 13.4 --sign-pitch -1
+python3 -m flydigi_daemon calibrate --set-yaw 0.67 --sign-pitch -1
 ```
 
 之后在 `desktop` 配置里按 **Home** 开/关体感；灵敏度/平滑/死区在

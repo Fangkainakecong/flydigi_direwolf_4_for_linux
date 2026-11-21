@@ -834,7 +834,8 @@ jstest /dev/input/jsN
 - `calibrate`：静置 3 s（噪声 RMS）→ 水平 **3 整圈**（默认，可 `--turns`）→
   低头 90°；自动检测起停、挑主导轴、判符号；yaw/pitch 分别测量后按角度加权，
   差异过大时提示重做；写 `config/calibration.json`（不进 git）。
-  `--estimate` 用 11-19 抓包的估算值，`--set-yaw/--set-pitch` 可直接写常数
+  `--estimate` 用 11-21 三次整圈标定的估算值 0.67 raw·s/°，
+  `--set-yaw/--set-pitch` 可直接写常数
 - **官方文件里没有物理标定**：体感块只有 target/enable/deadzone/sensitivity
   （出厂 25/25、死区 8）；上游也写明 LSB-per-deg/s 无参考值。详见
   `docs/findings-motion.md` 的"官方参数"一节
