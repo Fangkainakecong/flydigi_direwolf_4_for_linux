@@ -187,14 +187,22 @@ max_speed = 1200       # 满推像素/秒
 invert = false
 ```
 
-按钮类目标（`key:`/`mouse:`/`wheel:`）用阈值：
+按钮类目标（`key:`/`mouse:`）用阈值。滚轮有两种写法：
 
 ```toml
+# 比例模式（推荐）：越按越快
 [profile.desktop.axis.lt]
 target = "wheel:up"
+deadzone = 0.15
+max_hz = 30                # 按到底每秒 30 格
+curve = 1.4                # 轻按更慢
+
+# 固定阈值模式（兼容旧配置）
+[profile.desktop.axis.rt]
+target = "wheel:down"
 threshold = 0.35
-release_threshold = 0.25   # 迟滞
-repeat_hz = 18             # 按住时每秒 18 格
+release_threshold = 0.25
+repeat_hz = 18
 ```
 
 `keypair`：
@@ -808,7 +816,7 @@ jstest /dev/input/jsN
 
 - 已支持：按钮/扳机/摇杆 → `xbox:*`、`key:*`（含组合键）、`mouse:*`、
   `wheel:*`、`toggle:*`；轴 → `mouse:x/y`、`keypair`、阈值按键/鼠标、
-  阈值滚轮（迟滞 + `repeat_hz` 连发）、`xbox:abs_*`
+  滚轮（比例 `max_hz`/`curve` 或固定阈值 `repeat_hz`）、`xbox:abs_*`
 - `passthrough = true` 原样转发标准输入；显式条目覆盖对应输入（含轴和十字键）
 - 组：按钮/轴条目可带 `group`；`toggle:<组>` 只认按下沿，关组立即释放
 - 启动前和 `check` 都会 lint；有错误直接退出码 2，warnings 只提示

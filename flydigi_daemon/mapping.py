@@ -185,6 +185,7 @@ class AxisRule:
     sensitivity: float = 1.0
     smoothing: float = 0.0
     deadband: float = 0.0
+    max_hz: float = 0.0
 
 
 @dataclass
@@ -250,6 +251,8 @@ def parse_axis_rule(name, data):
         rule.smoothing = float(data['smoothing'])
     if 'deadband' in data:
         rule.deadband = float(data['deadband'])
+    if 'max_hz' in data:
+        rule.max_hz = float(data['max_hz'])
 
     if target.kind == 'keypair':
         for side in ('neg', 'pos'):
@@ -268,12 +271,18 @@ def parse_axis_rule(name, data):
             raise ConfigError('[axis.%s] 不能映射到 mouse:%s'
                               % (name, target.value))
     elif target.kind == 'wheel':
-        if 'threshold' not in data:
-            rule.threshold = 0.35
-        if rule.release_threshold >= rule.threshold:
-            rule.release_threshold = max(0.0, rule.threshold - 0.1)
-        if rule.repeat_hz <= 0 and name in ('lt', 'rt'):
-            rule.repeat_hz = 18.0
+        if rule.max_hz > 0:
+            # 比例滚轮：按键越深滚得越快，deadzone 以下停止。
+            rule.deadzone = float(data.get('deadzone', 0.12))
+            if not (0.0 <= rule.deadzone < 1.0):
+                raise ConfigError('[axis.%s] deadzone 必须在 0..1' % (name,))
+        else:
+            if 'threshold' not in data:
+                rule.threshold = 0.35
+            if rule.release_threshold >= rule.threshold:
+                rule.release_threshold = max(0.0, rule.threshold - 0.1)
+            if rule.repeat_hz <= 0 and name in ('lt', 'rt'):
+                rule.repeat_hz = 18.0
     return rule
 
 
@@ -552,7 +561,7 @@ class Mapper(object):
             else:
                 self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
                                  keys, mouse)
-                wheel += self._axis_wheel(rule, value, now)
+                wheel += self._axis_wheel(rule, value, now, dt)
                 self._apply_keypair(rule, value, pad_buttons, keys, mouse)
 
         dx, dy = self._flush_mouse()
@@ -677,9 +686,24 @@ class Mapper(object):
         degrees = (ema * dt) / params['counts_per_degree']
         self.acc['mouse:' + rule.target.value] += degrees * rule.sensitivity
 
-    def _axis_wheel(self, rule, value, now):
+    def _axis_wheel(self, rule, value, now, dt=0.0):
         if rule.target.kind != 'wheel':
             return 0
+        if rule.max_hz > 0:
+            # 比例滚轮：rate = max_hz * ((v-dz)/(1-dz))^curve
+            state = self.axis_state.setdefault(id(rule), {'wheel_acc': 0.0})
+            dz = _clamp(rule.deadzone, 0.0, 0.95)
+            if value <= dz:
+                state['wheel_acc'] = 0.0
+                return 0
+            norm = (value - dz) / (1.0 - dz)
+            if rule.curve and rule.curve != 1.0:
+                norm = norm ** rule.curve
+            state['wheel_acc'] += (rule.max_hz * norm * dt *
+                                   (1 if rule.target.value > 0 else -1))
+            steps = int(state['wheel_acc'])
+            state['wheel_acc'] -= steps
+            return steps
         state = self.axis_state.setdefault(
             id(rule), {'active': False, 'next': 0.0})
         if state['active']:
@@ -861,10 +885,16 @@ def describe_axis(rule, short=False):
             params.append('曲线 %.1f' % rule.curve)
         params.append('速度 %d px/s' % rule.max_speed)
     elif rule.target.kind == 'wheel':
-        params.append('阈值 %.2f' % rule.threshold)
-        params.append('释放 %.2f' % rule.release_threshold)
-        if rule.repeat_hz:
-            params.append('连发 %g Hz' % rule.repeat_hz)
+        if rule.max_hz > 0:
+            params.append('死区 %.2f' % rule.deadzone)
+            params.append('最大 %g 格/秒' % rule.max_hz)
+            if rule.curve != 1.0:
+                params.append('曲线 %.1f' % rule.curve)
+        else:
+            params.append('阈值 %.2f' % rule.threshold)
+            params.append('释放 %.2f' % rule.release_threshold)
+            if rule.repeat_hz:
+                params.append('连发 %g Hz' % rule.repeat_hz)
     elif rule.target.kind in ('key', 'mouse_button'):
         params.append('阈值 %.2f' % rule.threshold)
     elif rule.target.kind == 'pad_axis':

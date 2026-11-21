@@ -197,6 +197,36 @@ def test_wheel_threshold_repeat_and_hysteresis():
     assert mapper.apply(high, 0.2).wheel == 1
 
 
+def test_wheel_is_proportional():
+    def run(depth, frames=10, dt=0.1):
+        mapper = Mapper(profile({'axis': {'lt': {
+            'target': 'wheel:up', 'deadzone': 0.1,
+            'max_hz': 20, 'curve': 1.0,
+        }}}))
+        trig = int(depth * 255)
+        mapper.apply(raw(triggers=(trig, 0)), 0.0)
+        return sum(mapper.apply(raw(triggers=(trig, 0)),
+                                i * dt).wheel for i in range(1, frames + 1))
+
+    full = run(1.0)          # 20 格/秒 × 1 秒
+    half = run(128 / 255)
+    light = run(51 / 255)
+    assert 19 <= full <= 20, full
+    assert 8 <= half <= 9, half
+    assert 2 <= light <= 3, light
+    assert full > half > light
+
+
+def test_proportional_wheel_stops_below_deadzone():
+    mapper = Mapper(profile({'axis': {'lt': {
+        'target': 'wheel:up', 'deadzone': 0.2,
+        'max_hz': 30, 'curve': 1.0,
+    }}}))
+    mapper.apply(raw(triggers=(255, 0)), 0.0)
+    assert mapper.apply(raw(triggers=(255, 0)), 0.1).wheel > 0
+    assert mapper.apply(raw(triggers=(20, 0)), 0.2).wheel == 0
+
+
 def test_pad_axis_target():
     mapper = Mapper(profile({'axis': {'lt': {'target': 'xbox:abs_z'}}}))
     frame = mapper.apply(raw(triggers=(128, 0)), 0.0)

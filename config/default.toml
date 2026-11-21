@@ -148,15 +148,16 @@ invert = false             # 标定后如果上下反了改成 true
 
 [profile.desktop.axis.lt]
 target = "wheel:up"
-threshold = 0.35
-release_threshold = 0.25   # 迟滞，防止在阈值附近抖动
-repeat_hz = 18
+# 比例滚轮：越按越快；deadzone 以下不滚
+deadzone = 0.15
+max_hz = 30                # 按到底时每秒 30 格
+curve = 1.4
 
 [profile.desktop.axis.rt]
 target = "wheel:down"
-threshold = 0.35
-release_threshold = 0.25
-repeat_hz = 18
+deadzone = 0.15
+max_hz = 30
+curve = 1.4
 
 # 右摇杆 → WASD（可选，默认注释）
 # [profile.desktop.axis.rx]

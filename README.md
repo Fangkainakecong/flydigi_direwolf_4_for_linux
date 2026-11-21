@@ -105,7 +105,7 @@ sudo python3 -m flydigi_daemon calibrate
 LSB-per-deg/s 没有参考值。所以 counts/degree 只能测，或手动给常数：
 
 ```bash
-# 不想做动作：用 2026-11-19 抓包估算值（约 ±20%，仅起步）
+# 不想做动作：用 2026-11-21 三次整圈标定的估算值（约 ±10%，仅起步）
 python3 -m flydigi_daemon calibrate --estimate
 
 # 以后拿到官方/数据表值，直接写
@@ -123,6 +123,24 @@ deadband = 1.5        # 小于这个 raw 角速度视为噪声
 ```
 
 体感会和左摇杆**相加**，两者都映射到 `mouse:x/y`，不需要二选一。
+
+其他轴参数也都能在 `config/user.toml` 覆盖（默认值不变）：
+
+```toml
+# 左摇杆 → 鼠标：满推 1200 px/s、曲线 2.0、死区 0.12
+[profile.desktop.axis.lx]
+max_speed = 3000      # 想更快就加大
+curve = 1.5           # 1=线性
+deadzone = 0.08
+
+# 扳机 → 滚轮：比例控制（默认 max_hz=30、curve=1.4）
+[profile.desktop.axis.lt]
+deadzone = 0.12
+max_hz = 40           # 按到底每秒 40 格
+curve = 1.5
+```
+
+`curve` 越大，轻推/轻按越慢、重推/重按越快；`show` 会显示最终生效值。
 
 `show --html` 生成 `config/mappings.html`（自包含单文件，不进 git），
 四个槽各一页，按钮卡片 + 轴参数表，改完重新生成即可。
