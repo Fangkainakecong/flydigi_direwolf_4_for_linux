@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from flydigi_daemon import config, mapping, ui      # noqa: E402
+from flydigi_daemon import config, mapping, status, ui   # noqa: E402
 
 DEFAULT = config.load(config.DEFAULT_PATH)
 
@@ -32,6 +32,9 @@ def test_model_has_buttons_and_axes():
     assert axes['lt']['value']['max_hz'] == 30
     assert axes['gyro_x']['value']['sensitivity'] == 8.0
     assert axes['gyro_z']['value'] is None
+    assert desktop['original'] == 'desktop'
+    assert desktop['passthrough'] is False
+    assert desktop['groups'] == {'gyro': False}
 
 
 def test_dump_toml_roundtrip():
@@ -45,6 +48,20 @@ def test_dump_toml_roundtrip():
     assert axis['target'] == 'mouse:x'
     assert axis['max_speed'] == 3000.0
     assert axis['invert'] is True
+
+
+def model_posted(model):
+    profiles = {}
+    for profile in model['profiles']:
+        profiles[profile['original']] = {
+            'name': profile['name'],
+            'passthrough': profile['passthrough'],
+            'groups': profile['groups'],
+            'buttons': {b['source']: b['value'] for b in profile['buttons']},
+            'axes': {a['axis']: a['value'] for a in profile['axes']
+                     if a['value']},
+        }
+    return {'profiles': profiles}
 
 
 def _posted(**overrides):
@@ -104,6 +121,75 @@ def test_save_overrides_and_diff():
         assert 'axis' not in prof or not prof['axis'].get('lx')
 
 
+def test_rename_profile_full_copy():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        posted = model_posted(ui.build_model(config.load()))
+        posted['profiles']['desktop']['name'] = '桌面'
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert ok, errors
+        data = tomli.load(open(path, 'rb'))
+        assert '桌面' in data['profile']
+        assert 'desktop' not in data['profile']
+        assert data['daemon']['slot_profiles'][1] == '桌面'
+        merged = config.load(config.DEFAULT_PATH, user_path=path)
+        parsed = mapping.parse_config(merged)
+        assert parsed['桌面'].passthrough is False
+        assert parsed['桌面'].groups['gyro'] is False
+        assert parsed['桌面'].axes['lx'].target.value == 'x'
+        assert parsed['桌面'].axes['gyro_x'].sensitivity == 8.0
+        assert parsed['桌面'].buttons['a'].target.value == \
+            (mapping._KEY_CODES['space'],)
+        assert config.slot_profiles(merged)[1] == '桌面'
+
+
+def test_rename_passthrough_profile():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        posted = model_posted(ui.build_model(config.load()))
+        posted['profiles']['gamepad']['name'] = '标准手柄'
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert ok, errors
+        merged = config.load(config.DEFAULT_PATH, user_path=path)
+        parsed = mapping.parse_config(merged)
+        assert parsed['标准手柄'].passthrough is True
+        assert parsed['标准手柄'].buttons['m1'].target.value == 'lb'
+
+
+def test_rename_can_turn_off_passthrough_and_groups():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        posted = model_posted(ui.build_model(config.load()))
+        posted['profiles']['gamepad']['name'] = '自定义手柄'
+        posted['profiles']['gamepad']['passthrough'] = False
+        posted['profiles']['desktop']['groups']['gyro'] = True
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert ok, errors
+        merged = config.load(config.DEFAULT_PATH, user_path=path)
+        parsed = mapping.parse_config(merged)
+        assert parsed['自定义手柄'].passthrough is False
+        assert parsed['desktop'].groups.get('gyro', True) is True
+
+
+def test_rename_duplicate_rejected():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        posted = model_posted(ui.build_model(config.load()))
+        posted['profiles']['desktop']['name'] = 'gamepad'
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert not ok
+        assert any('重复' in e for e in errors), errors
+
+
+def test_keyboard_target_names():
+    names = ('kp0', 'kp_plus', 'kp_minus', 'kp_dot', 'kp_enter',
+             'rightctrl', 'rightshift', 'f13', 'playpause', 'nextsong',
+             'volumeup', 'mute', 'sysrq', 'compose', 'leftbrace')
+    for name in names:
+        target = mapping.parse_button_target('key:' + name)
+        assert target.kind == 'key'
+
+
 def test_save_rejects_bad_target():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
@@ -113,6 +199,19 @@ def test_save_rejects_bad_target():
         assert not ok
         assert any('未知按键名' in e for e in errors), errors
         assert not os.path.exists(path)
+
+
+def test_status_roundtrip():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = config.load()
+        path = os.path.join(tmp, 'status.json')
+        cfg['daemon']['status_file'] = path
+        status.write(cfg, {'battery': 5, 'connect': 0, 'slot': 3,
+                           'fw': '4.0.7.2', 'uid': 'x'})
+        data = status.read(cfg)
+        assert data['battery'] == 5
+        assert data['battery_percent'] == 100
+        assert oct(os.stat(path).st_mode & 0o777) == '0o644'
 
 
 def test_render_page():
@@ -125,8 +224,9 @@ def test_render_page():
 
 def test_http_model_and_save():
     model = ui.build_model(config.load())
+    cfg = config.load()
     server = ui.ThreadingHTTPServer(('127.0.0.1', 0),
-                                    ui.make_handler(model))
+                                    ui.make_handler(model, cfg))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
@@ -138,6 +238,15 @@ def test_http_model_and_save():
         assert len(data['profiles']) >= 4
 
         with tempfile.TemporaryDirectory() as tmp:
+            cfg['daemon']['status_file'] = os.path.join(tmp, 'status.json')
+            status.write(cfg, {'battery': 4, 'connect': 0, 'slot': 3,
+                               'fw': '4.0.7.2', 'uid': 'x'})
+            conn.request('GET', '/api/status')
+            info = json.loads(conn.getresponse().read())
+            assert info['available'] and info['battery'] == 4
+            assert info['battery_percent'] == 80
+
+        with tempfile.TemporaryDirectory() as tmp:
             ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
             conn.request('POST', '/api/save',
                          body=json.dumps(_posted()),
@@ -146,6 +255,13 @@ def test_http_model_and_save():
             payload = json.loads(response.read())
             assert response.status == 200 and payload['ok'], payload
             assert os.path.exists(ui.cfgmod.USER_PATH)
+
+            conn.request('GET', '/api/model')
+            updated = json.loads(conn.getresponse().read())
+            desktop = [p for p in updated['profiles']
+                       if p['name'] == 'desktop'][0]
+            a = [b for b in desktop['buttons'] if b['source'] == 'a'][0]
+            assert a['value'] == 'key:f'
     finally:
         ui.cfgmod.USER_PATH = old_user
         server.shutdown()

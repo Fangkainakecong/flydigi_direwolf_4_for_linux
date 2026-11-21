@@ -152,14 +152,24 @@ python3 -m flydigi_daemon edit
 ```
 
 会启动只监听 `127.0.0.1:8765` 的本地网页并自动打开浏览器（`--port` 换端口，
-`--no-open` 不自动打开）。四套配置分页，每个物理键、每个轴（摇杆/扳机/体感）
-的目标和全部参数都能直接改：
+`--no-open` 不自动打开）。四套配置分页，**配置名可以直接改**（不再绑定
+gamepad/desktop/media 的用途），每个物理键、每个轴（摇杆/扳机/体感）的目标和
+全部参数都能直接改：
 
+- 配置名：四页顶部的名字输入框，保存后同步更新 `slot_profiles` / `startup_profile`
+- 标准输入透传、每个组（如 `gyro`）的初值也可以勾选
 - 按钮：目标字符串，留空 = 继承默认，`none` = 关闭
+- 键盘映射：点目标框旁的 **⌨**，然后直接在键盘上按键（支持组合键、单独修饰键、
+  Esc/F1–F24/小键盘/媒体键），不用下拉菜单
 - 摇杆：`deadzone` / `curve` / `max_speed` / `invert`
 - 扳机滚轮：`deadzone` / `max_hz` / `curve`（比例）或 `threshold` / `repeat_hz`（固定）
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
+
+右上角有一个小电池图标：显示 daemon/`check` 最近一次用 cmd16 读到的电量
+（0..5 档换算成百分比）和固件版本；daemon 没运行过时会显示灰色 `—`。
+电量来自 `/var/lib/flydigi/status.json`，`sudo python3 -m flydigi_daemon check`
+也可以刷新一次。
 
 保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
 `.bak`），不会覆盖默认配置。改完重启 daemon 生效。

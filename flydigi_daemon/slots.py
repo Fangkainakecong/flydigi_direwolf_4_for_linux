@@ -86,6 +86,10 @@ class SlotController(object):
             name = saved.get('profile')
             if name in self.profiles:
                 return self.profiles.index(name)
+            # 配置改名后旧名字失效，但槽位序号还在；优先按序号恢复。
+            index = saved.get('slot')
+            if isinstance(index, int) and 0 <= index < len(self.profiles):
+                return index
         if startup_profile in self.profiles:
             return self.profiles.index(startup_profile)
         return 0

@@ -137,6 +137,15 @@ def test_suppress_disabled_still_switches_but_does_not_swallow():
     assert out.buttons == frozenset({'back', 'x'}), out.buttons
 
 
+def test_state_falls_back_to_saved_slot_after_rename():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'state.json')
+        with open(path, 'w') as f:
+            f.write('{"profile": "old-name", "slot": 2}')
+        ctrl, _ = make(state_path=path)
+        assert ctrl.slot == 2 and ctrl.profile == 'media'
+
+
 def test_state_file_roundtrip():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'state.json')

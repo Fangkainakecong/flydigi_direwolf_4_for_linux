@@ -17,6 +17,7 @@ import time
 from . import config as cfgmod
 from . import mapping
 from . import report as rep
+from . import status as statusmod
 from . import usb
 from .devices import Devices, device_node, scan_event_nodes
 from .slots import SlotController
@@ -99,6 +100,7 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         if info:
             print('识别: 固件=%s uid=%s 当前槽位=%d'
                   % (info['fw'], info['uid'], info['slot']))
+            statusmod.write(cfg, info)
         else:
             print('⚠ cmd16 无应答（不影响转发，但读不到槽位）')
 

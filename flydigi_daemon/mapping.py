@@ -58,7 +58,8 @@ KEY_ALIASES = {
     'ctrl': 'leftctrl', 'shift': 'leftshift', 'alt': 'leftalt',
     'win': 'leftmeta', 'super': 'leftmeta', 'meta': 'leftmeta',
     'pgup': 'pageup', 'pgdn': 'pagedown', 'kp_plus': 'kpplus',
-    'kp_minus': 'kpminus', 'plus': 'equal',
+    'kp_minus': 'kpminus', 'kp_dot': 'kpdot', 'kp_enter': 'kpenter',
+    'kp_multiply': 'kpmultiply', 'kp_divide': 'kpdivide', 'plus': 'equal',
 }
 MODIFIER_CODES = {
     ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL,

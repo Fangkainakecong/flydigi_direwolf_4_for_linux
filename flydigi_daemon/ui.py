@@ -15,9 +15,11 @@
 import html
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -25,6 +27,7 @@ import tomli
 
 from . import config as cfgmod
 from . import mapping
+from . import status as statusmod
 from .show import AXIS_ROWS, BUTTON_ROWS, STANDARD_SOURCES
 
 PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ui.html')
@@ -91,8 +94,8 @@ def build_model(cfg):
     default_cfg = cfgmod.load(cfgmod.DEFAULT_PATH)
     default_profiles = mapping.parse_config(default_cfg)
     effective = mapping.parse_config(cfg)
-    order = cfgmod.slot_profiles(cfg)
-    order += [name for name in effective if name not in order]
+    # 只编辑四槽实际引用的 profile；改名后不要显示 default 里的旧名字。
+    order = [name for name in cfgmod.slot_profiles(cfg) if name in effective]
 
     profiles = []
     for name in order:
@@ -117,10 +120,20 @@ def build_model(cfg):
                 'hint': (mapping.describe_axis(eff.axes[axis], short=True)
                          if axis in eff.axes else '—'),
             })
-        profiles.append({'name': name,
-                         'slot': order.index(name) + 1 if name in
-                         cfgmod.slot_profiles(cfg) else 0,
-                         'buttons': buttons, 'axes': axes})
+        slots = cfgmod.slot_profiles(cfg)
+        group_names = sorted(set(eff.groups) | set(dft.groups if dft else {}))
+        profiles.append({
+            'original': name,
+            'name': name,
+            'slot': slots.index(name) + 1 if name in slots else 0,
+            'passthrough': eff.passthrough,
+            'default_passthrough': bool(dft.passthrough) if dft else False,
+            'groups': {g: bool(eff.groups.get(g, True)) for g in group_names},
+            'default_groups': {g: bool(dft.groups.get(g, True)) if dft
+                               else True for g in group_names},
+            'buttons': buttons,
+            'axes': axes,
+        })
     return {'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
@@ -136,7 +149,18 @@ def _dump_value(value):
         return str(value)
     if isinstance(value, float):
         return repr(value)
+    if isinstance(value, (list, tuple)):
+        return '[' + ', '.join(_dump_value(v) for v in value) + ']'
     raise TypeError('不支持的 TOML 值: %r' % (value,))
+
+
+_BARE_KEY = re.compile(r'^[A-Za-z0-9_-]+$')
+
+
+def _key(name):
+    name = str(name)
+    return name if _BARE_KEY.match(name) else json.dumps(
+        name, ensure_ascii=False)
 
 
 def dump_toml(data):
@@ -148,14 +172,14 @@ def dump_toml(data):
                    if not isinstance(v, dict)]
         tables = [(k, v) for k, v in table.items() if isinstance(v, dict)]
         for key, value in scalars:
-            lines.append('%s = %s' % (key, _dump_value(value)))
+            lines.append('%s = %s' % (_key(key), _dump_value(value)))
         for key, value in tables:
-            name = '%s.%s' % (prefix, key) if prefix else key
+            parts = prefix + [_key(key)]
             lines.append('')
-            lines.append('[%s]' % name)
-            walk(name, value)
+            lines.append('[%s]' % '.'.join(parts))
+            walk(prefix + [_key(key)], value)
 
-    walk('', data)
+    walk([], data)
     return '\n'.join(lines).rstrip() + '\n'
 
 
@@ -170,17 +194,21 @@ def _read_user(path):
         raise mapping.ConfigError('config/user.toml 语法错误：%s' % exc)
 
 
-def _profile_overrides(default_profiles, name, posted, existing):
-    dft = default_profiles.get(name)
+def _profile_overrides(default_profiles, original, posted, existing, full):
+    dft = default_profiles.get(original)
     prof = {}
+
     buttons = posted.get('buttons') or {}
     for source, value in buttons.items():
         if not isinstance(value, str):
             continue
-        default = button_value(dft, source)
-        if value == default or value == '':
+        value = value.strip()
+        if not value:
             continue
-        prof[source] = value
+        base = button_value(dft, source)
+        if full or value != base:
+            prof[source] = value
+
     axes = posted.get('axes') or {}
     for axis, value in axes.items():
         if not value or not isinstance(value, dict):
@@ -188,23 +216,42 @@ def _profile_overrides(default_profiles, name, posted, existing):
         target = str(value.get('target', '')).strip()
         if not target:
             continue
-        dft_rule = axis_dict(dft.axes.get(axis)) if dft else None
-        clean = {}
-        for field in AXIS_FIELDS:
-            if field not in value:
-                continue
-            clean[field] = value[field]
+        clean = {field: value[field] for field in AXIS_FIELDS
+                 if field in value}
         clean['target'] = target
-        if dft_rule is None:
+        if full or dft is None:
             prof.setdefault('axis', {})[axis] = clean
         else:
-            diff = {k: v for k, v in clean.items()
-                    if dft_rule.get(k) != v}
-            if diff:
-                prof.setdefault('axis', {})[axis] = diff
+            base_rule = axis_dict(dft.axes.get(axis))
+            if base_rule is None:
+                prof.setdefault('axis', {})[axis] = clean
+            else:
+                diff = {k: v for k, v in clean.items()
+                        if base_rule.get(k) != v}
+                if diff:
+                    prof.setdefault('axis', {})[axis] = diff
 
-    # 保留 UI 不管理的其它键（自定义 source / 未知轴）
-    old = (existing.get('profile') or {}).get(name) or {}
+    passthrough = bool(posted.get('passthrough'))
+    base_passthrough = bool(dft.passthrough) if dft else False
+    if full:
+        if passthrough:
+            prof['passthrough'] = True
+    elif passthrough != base_passthrough:
+        prof['passthrough'] = passthrough
+
+    groups = {str(k): bool(v) for k, v in (posted.get('groups') or {}).items()}
+    base_groups = dft.groups if dft else {}
+    if full:
+        # 新名字没有默认组，组的隐式默认是 true，只有 false 需要写。
+        group_diff = {k: v for k, v in groups.items() if not v}
+    else:
+        group_diff = {k: v for k, v in groups.items()
+                      if bool(base_groups.get(k, True)) != v}
+    if group_diff:
+        prof['groups'] = group_diff
+
+    # 保留 UI 不管理的其它键（自定义 source / 未知轴 / 其它段）
+    old = (existing.get('profile') or {}).get(original) or {}
     managed_sources = {row[1] for row in BUTTON_ROWS}
     managed_axes = {row[1] for row in AXIS_ROWS}
     for key, value in old.items():
@@ -213,6 +260,9 @@ def _profile_overrides(default_profiles, name, posted, existing):
                      if axis not in managed_axes}
             if extra:
                 prof.setdefault('axis', {}).update(extra)
+        elif key in ('passthrough', 'groups'):
+            # 这两个由上面的 UI 状态决定，不能把旧值原样带回来。
+            continue
         elif key not in managed_sources and key not in prof:
             prof[key] = value
     return prof
@@ -220,18 +270,56 @@ def _profile_overrides(default_profiles, name, posted, existing):
 
 def apply_overrides(default_cfg, posted, existing):
     default_profiles = mapping.parse_config(default_cfg)
+    base = cfgmod.merge(default_cfg, existing)
+    base_daemon = base.get('daemon', {}) or {}
+    base_slots = list(base_daemon.get('slot_profiles', []))
+    base_startup = base_daemon.get('startup_profile')
+    existing_profiles = dict(existing.get('profile') or {})
+    posted_profiles = posted.get('profiles') or {}
+
+    finals = {}
+    for original, data in posted_profiles.items():
+        if not isinstance(data, dict):
+            raise mapping.ConfigError('profile %r 数据格式错误' % (original,))
+        name = str(data.get('name') or original).strip()
+        if not name:
+            raise mapping.ConfigError('profile 名字不能为空')
+        if len(name) > 64:
+            raise mapping.ConfigError('profile 名字太长：%r' % (name,))
+        finals[original] = name
+
+    unposted = (set(existing_profiles) | set(default_profiles)) - set(
+        posted_profiles)
+    all_names = list(finals.values()) + list(unposted)
+    if len(all_names) != len(set(all_names)):
+        raise mapping.ConfigError('profile 名字重复：%s'
+                                 % ', '.join(sorted(all_names)))
+
+    new_profiles = {name: data for name, data in existing_profiles.items()
+                    if name not in posted_profiles}
+    for original, data in posted_profiles.items():
+        new = finals[original]
+        full = (new != original) or (original not in default_profiles)
+        prof = _profile_overrides(default_profiles, original, data,
+                                  existing, full)
+        if prof or full:
+            new_profiles[new] = prof
+
+    slots = [finals.get(name, name) for name in base_slots]
+    startup = finals.get(base_startup, base_startup) if base_startup else None
+
     out = dict(existing)
-    profiles = dict(out.get('profile') or {})
-    for name, data in (posted.get('profiles') or {}).items():
-        prof = _profile_overrides(default_profiles, name, data, existing)
-        if prof:
-            profiles[name] = prof
-        else:
-            profiles.pop(name, None)
-    if profiles:
-        out['profile'] = profiles
+    if new_profiles:
+        out['profile'] = new_profiles
     else:
         out.pop('profile', None)
+    daemon = dict(out.get('daemon') or {})
+    if slots:
+        daemon['slot_profiles'] = slots
+    if startup:
+        daemon['startup_profile'] = startup
+    if daemon:
+        out['daemon'] = daemon
     return out
 
 
@@ -280,7 +368,10 @@ def render_page(model):
         return f.read().replace('__MODEL__', payload)
 
 
-def make_handler(model):
+def make_handler(model, cfg):
+    # 保存后重建 model，页面刷新才能看到新的配置名。
+    state = {'model': model, 'cfg': cfg}
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):      # noqa: A003
             pass
@@ -295,9 +386,16 @@ def make_handler(model):
 
         def do_GET(self):                        # noqa: N802
             if self.path in ('/', '/index.html'):
-                self._send(200, render_page(model), 'text/html')
+                self._send(200, render_page(state['model']), 'text/html')
             elif self.path == '/api/model':
-                self._send(200, json.dumps(model), 'application/json')
+                self._send(200, json.dumps(state['model']),
+                           'application/json')
+            elif self.path == '/api/status':
+                data = statusmod.read(state['cfg'])
+                payload = {'available': bool(data), 'server_time': time.time()}
+                if data:
+                    payload.update(data)
+                self._send(200, json.dumps(payload), 'application/json')
             else:
                 self._send(404, 'not found', 'text/plain')
 
@@ -321,6 +419,12 @@ def make_handler(model):
                                             posted, cfgmod.USER_PATH)
             except Exception as exc:            # noqa: BLE001
                 ok, errors = False, ['保存失败：%r' % (exc,)]
+            if ok:
+                try:
+                    state['cfg'] = cfgmod.load()
+                    state['model'] = build_model(state['cfg'])
+                except Exception:               # noqa: BLE001
+                    pass
             payload = {'ok': ok, 'errors': errors,
                        'path': cfgmod.USER_PATH}
             self._send(200 if ok else 400, json.dumps(payload),
@@ -334,7 +438,7 @@ def run(cfg, args):
     url = 'http://127.0.0.1:%d/' % args.port
     try:
         server = ThreadingHTTPServer(('127.0.0.1', args.port),
-                                     make_handler(model))
+                                     make_handler(model, cfg))
     except OSError as exc:
         # 快捷方式重复点击时端口已占用：如果占用者就是本编辑器，直接开页面。
         try:

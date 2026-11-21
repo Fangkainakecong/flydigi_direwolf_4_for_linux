@@ -84,6 +84,28 @@ def calibration_file(cfg):
     return path
 
 
+def status_file(cfg):
+    """daemon 写入、编辑器读取的电量/状态文件。
+
+    root 服务和普通用户必须指向同一个可读文件，否则网页读不到电量。
+    优先 `/var/lib/flydigi/status.json`（root 写 0644，用户可读）；文件不存在
+    时普通用户回退到自己的 XDG 目录（只用于测试/手动写入）。
+    """
+    path = daemon_section(cfg).get('status_file') or ''
+    if path:
+        return os.path.expanduser(str(path))
+    shared = '/var/lib/flydigi/status.json'
+    if os.geteuid() == 0 or os.path.exists(shared):
+        return shared
+    state = daemon_section(cfg).get('state_file') or ''
+    if state:
+        folder = os.path.dirname(os.path.expanduser(str(state)))
+    else:
+        from .slots import default_state_path
+        folder = os.path.dirname(default_state_path())
+    return os.path.join(folder or '.', 'status.json')
+
+
 def device_section(cfg):
     dev = cfg.get('device', {})
     return {

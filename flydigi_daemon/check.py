@@ -6,6 +6,7 @@
 
 
 from . import config as cfgmod
+from . import status as statusmod
 from . import usb
 from .report import KEY_NAMES
 
@@ -96,6 +97,7 @@ def run(cfg, deep=True):
         print('识别: DeviceType=%d uid=%s 固件=%s 电量=%d 连接=%d 当前槽位=%d'
               % (info['device_type'], info['uid'], info['fw'],
                  info['battery'], info['connect'], info['slot']))
+        statusmod.write(cfg, info)
 
         slot = info['slot']
         print('读取板载槽 %d（约 1.5 s）…' % slot)

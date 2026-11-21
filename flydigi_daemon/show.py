@@ -77,8 +77,8 @@ def _resolve(profile, source):
 def build_views(cfg):
     profiles = mapping.parse_config(cfg)
     slots = cfgmod.slot_profiles(cfg)
+    # 只展示四槽实际引用的 profile（改名后 default 里的旧名字不再出现）。
     order = [name for name in slots if name in profiles]
-    order += [name for name in profiles if name not in order]
     views = []
     for name in order:
         profile = profiles[name]

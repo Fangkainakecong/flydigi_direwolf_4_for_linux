@@ -27,6 +27,8 @@ suppress_chord = true
 # 上次的配置存在这里；留空 = root 用 /var/lib/flydigi/state.json，
 # 普通用户用 ~/.local/state/flydigi/state.json。
 state_file = ""
+# daemon 写入的电量/固件状态文件；留空 = 和 state_file 同目录的 status.json。
+status_file = ""
 
 [device]
 vendor = 0x045e

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 
 from . import config as cfgmod
 from . import report as rep
+from . import status as statusmod
 from . import usb
 
 YAW_DEGREES = 360.0
@@ -325,6 +326,7 @@ def run(cfg, args, calibration_path):
         info = usb.identify_retry(link, tries=3)
         if info:
             print('识别: 固件=%s uid=%s' % (info['fw'], info['uid']))
+            statusmod.write(cfg, info)
 
         print('\n[1/3] 把手柄平放在桌面，不要碰。')
         _prompt('按 Enter 开始静置 %.0f 秒…' % args.still)
