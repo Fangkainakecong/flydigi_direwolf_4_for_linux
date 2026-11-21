@@ -4,9 +4,11 @@
 import http.client
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
+import time
 
 import tomli
 
@@ -273,6 +275,68 @@ def test_http_model_and_save():
         ui.cfgmod.USER_PATH = old_user
         server.shutdown()
         server.server_close()
+
+
+def _free_port():
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+class _EditArgs(object):
+    no_open = True
+    idle_timeout = 0
+    port = 0
+
+
+def test_editor_save_exits():
+    old_user = ui.cfgmod.USER_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
+        args = _EditArgs()
+        args.port = _free_port()
+        thread = threading.Thread(target=ui.run,
+                                  args=(config.load(), args), daemon=True)
+        try:
+            thread.start()
+            conn = None
+            for _ in range(30):
+                try:
+                    conn = http.client.HTTPConnection('127.0.0.1', args.port,
+                                                      timeout=1)
+                    conn.request('GET', '/api/model')
+                    if conn.getresponse().status == 200:
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            assert conn is not None
+            conn.request('POST', '/api/save', body=json.dumps(_posted()),
+                         headers={'Content-Type': 'application/json'})
+            payload = json.loads(conn.getresponse().read())
+            assert payload['ok'], payload
+            thread.join(4)
+            assert not thread.is_alive(), '保存后编辑器没有退出'
+        finally:
+            ui.cfgmod.USER_PATH = old_user
+
+
+def test_editor_idle_exits():
+    old_user = ui.cfgmod.USER_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
+        args = _EditArgs()
+        args.port = _free_port()
+        args.idle_timeout = 0.2
+        thread = threading.Thread(target=ui.run,
+                                  args=(config.load(), args), daemon=True)
+        try:
+            thread.start()
+            thread.join(4)
+            assert not thread.is_alive(), '空闲超时没有退出'
+        finally:
+            ui.cfgmod.USER_PATH = old_user
 
 
 def main():

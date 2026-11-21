@@ -85,6 +85,8 @@ def build_parser():
                     help='本地端口（默认 8765，仅监听 127.0.0.1）')
     ed.add_argument('--no-open', action='store_true',
                     help='不自动打开浏览器')
+    ed.add_argument('--idle-timeout', type=float, default=1800,
+                    help='无请求多少秒后自动退出（默认 1800，0=不超时）')
 
     sh = sub.add_parser('show', help='打印映射表 / 生成可视化 HTML')
     sh.add_argument('--config', default=None)

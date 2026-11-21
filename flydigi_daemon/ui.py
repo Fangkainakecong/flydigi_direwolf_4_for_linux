@@ -152,7 +152,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 3, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 4, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +386,16 @@ def render_page(model):
         return f.read().replace('__MODEL__', payload)
 
 
+class EditorServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_request = time.time()
+        self.saved = False
+
+
 def make_handler(model, cfg):
     # 保存后重建 model，页面刷新才能看到新的配置名。
     state = {'model': model, 'cfg': cfg}
@@ -405,8 +415,10 @@ def make_handler(model, cfg):
 
         def do_GET(self):                        # noqa: N802
             if self.path in ('/', '/index.html'):
+                self.server.last_request = time.time()
                 self._send(200, render_page(state['model']), 'text/html')
             elif self.path == '/api/model':
+                self.server.last_request = time.time()
                 self._send(200, json.dumps(state['model']),
                            'application/json')
             elif self.path == '/api/status':
@@ -438,12 +450,14 @@ def make_handler(model, cfg):
                                             posted, cfgmod.USER_PATH)
             except Exception as exc:            # noqa: BLE001
                 ok, errors = False, ['保存失败：%r' % (exc,)]
+            self.server.last_request = time.time()
             if ok:
                 try:
                     state['cfg'] = cfgmod.load()
                     state['model'] = build_model(state['cfg'])
                 except Exception:               # noqa: BLE001
                     pass
+                self.server.saved = True
             payload = {'ok': ok, 'errors': errors,
                        'path': cfgmod.USER_PATH}
             self._send(200 if ok else 400, json.dumps(payload),
@@ -456,8 +470,8 @@ def run(cfg, args):
     model = build_model(cfg)
     url = 'http://127.0.0.1:%d/' % args.port
     try:
-        server = ThreadingHTTPServer(('127.0.0.1', args.port),
-                                     make_handler(model, cfg))
+        server = EditorServer(('127.0.0.1', args.port),
+                              make_handler(model, cfg))
     except OSError as exc:
         # 快捷方式重复点击时端口已占用：如果占用者就是本编辑器，直接开页面。
         try:
@@ -477,9 +491,26 @@ def run(cfg, args):
         return 1
     print('可视化编辑器: %s' % url)
     print('保存到: %s' % cfgmod.USER_PATH)
-    print('Ctrl-C 停止')
+    print('保存后编辑器会自动退出；Ctrl-C 停止')
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
+    idle = max(0.0, float(getattr(args, 'idle_timeout', 1800) or 0))
+
+    def monitor():
+        while True:
+            time.sleep(0.5)
+            if server.saved:
+                time.sleep(0.5)
+                print('已保存，编辑器退出')
+                server.shutdown()
+                return
+            if idle and time.time() - server.last_request > idle:
+                print('空闲超时，编辑器退出')
+                server.shutdown()
+                return
+
+    threading.Thread(target=monitor, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

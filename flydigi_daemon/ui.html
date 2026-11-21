@@ -11,6 +11,11 @@ body { margin: 0; padding: 22px 28px 80px; background: #12151c; color: #dce3ee;
            gap: 20px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
 .meta { color: #8b97ab; font-size: 12px; }
+.help { margin: 12px 0 0; background: #171e29; border: 1px solid #273043;
+        border-radius: 9px; padding: 8px 12px; color: #9fb0c7; font-size: 12px; }
+.help summary { cursor: pointer; color: #b9c9df; }
+.help p { margin: 7px 0 0; }
+.help b { color: #dce3ee; }
 .battery { display: flex; align-items: center; gap: 7px; padding-top: 4px;
            color: #9fb0c7; font-size: 12px; }
 .battery-body { width: 38px; height: 17px; border: 1.5px solid #6f7c93;
@@ -44,11 +49,15 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .section small { text-transform: none; letter-spacing: 0; color: #6f7c93; }
 .btn-grid { display: grid; grid-template-columns: repeat(3, minmax(230px, 1fr));
             gap: 8px; }
-.btnrow { display: grid; grid-template-columns: 72px 1fr auto; gap: 7px;
-          align-items: center; background: #1a202b; border: 1px solid #273043;
-          border-radius: 8px; padding: 6px 9px; }
+.btnrow { display: grid; grid-template-columns: 66px 112px minmax(0, 1fr) auto;
+          gap: 6px; align-items: center; background: #1a202b;
+          border: 1px solid #273043; border-radius: 8px; padding: 6px 9px; }
 .btnrow label { color: #8b97ab; font-size: 12px; }
-.btnrow .hint { grid-column: 2 / 4; color: #6f7c93; font-size: 11px; }
+.btnrow .hint { grid-column: 2 / 5; color: #6f7c93; font-size: 11px; }
+select.target-preset { width: 100%; background: #10141c; color: #cfe0f4;
+        border: 1px solid #2c3546; border-radius: 6px; padding: 4px 5px;
+        font: inherit; font-size: 12px; }
+.row.target-row { grid-template-columns: 86px 112px minmax(0, 1fr) auto; }
 input[type=text], input[type=number] { width: 100%; background: #10141c;
        border: 1px solid #2c3546; border-radius: 6px; color: #dce3ee;
        padding: 5px 7px; font: inherit; font-size: 13px; }
@@ -63,6 +72,7 @@ input:focus { outline: 1px solid #4d9cff; border-color: #4d9cff; }
 .axis-head .cur { color: #6f7c93; font-size: 11px; }
 .row { display: grid; grid-template-columns: 92px 1fr auto; gap: 7px;
        align-items: center; margin: 5px 0; }
+.row.target-row { grid-template-columns: 86px 112px minmax(0, 1fr) auto; }
 .row label { color: #8593a8; font-size: 12px; }
 .fields .hidden { display: none; }
 .axis-actions { display: flex; gap: 8px; justify-content: flex-end;
@@ -94,7 +104,18 @@ button.primary:disabled { opacity: .5; cursor: default; }
 <div class="topline">
   <div>
     <h1>飞智冰原狼4 · 映射编辑器</h1>
-    <div class="meta">保存到 <code>config/user.toml</code>，只写与默认配置不同的字段；改完重启 daemon 生效。</div>
+    <div class="meta">保存到 <code>config/user.toml</code>，只写与默认配置不同的字段；保存后编辑器自动退出。</div>
+    <details class="help">
+      <summary>两个勾选是什么意思？</summary>
+      <p><b>标准输入原样透传</b>：勾选时，ABXY、LB/RB、双摇杆、LT/RT、十字键、
+        Start/Back/Home 这些标准 Xbox 输入会原样进虚拟手柄；某个输入如果写了
+        显式映射，就以映射为准。取消勾选后，只有显式写了映射的输入才输出，
+        没映射的标准键会被吞掉。M1/M2/FN/Turbo 不是标准输入，永远需要显式映射。</p>
+      <p><b>组 gyro</b>：一个逻辑开关组。带 <code>group = "gyro"</code> 的条目
+        （默认的体感 gyro_x/gyro_y）只在这个组开启时生效。勾选 = 该配置启动时
+        组默认开启；取消 = 默认关闭，需要按映射到 <code>toggle:gyro</code> 的键
+        （桌面配置默认是 Home）在运行时打开。四个配置都会显示这个勾选。</p>
+    </details>
   </div>
   <div class="battery unknown" id="battery" title="电量">
     <div class="battery-body"><div class="battery-fill" id="battery-fill"></div></div>
@@ -136,6 +157,39 @@ const AXIS_FIELDS = [
   ['repeat_hz', '固定连发 Hz（比例=0）', 'number'],
   ['neg', '负向目标', 'text'],
   ['pos', '正向目标', 'text'],
+];
+
+const BUTTON_TARGET_OPTIONS = [
+  ['__inherit__', '继承默认（留空）'],
+  ['none', '关闭（none）'],
+  ['xbox:a', '手柄 A'], ['xbox:b', '手柄 B'],
+  ['xbox:x', '手柄 X'], ['xbox:y', '手柄 Y'],
+  ['xbox:lb', '手柄 LB'], ['xbox:rb', '手柄 RB'],
+  ['xbox:back', '手柄 SELECT'], ['xbox:start', '手柄 START'],
+  ['xbox:home', '手柄 HOME'],
+  ['xbox:l3', '手柄 L3'], ['xbox:r3', '手柄 R3'],
+  ['mouse:left', '鼠标左键'], ['mouse:right', '鼠标右键'],
+  ['mouse:middle', '鼠标中键'], ['mouse:side', '鼠标侧键'],
+  ['mouse:extra', '鼠标附加键'],
+  ['wheel:up', '滚轮上'], ['wheel:down', '滚轮下'],
+  ['toggle:gyro', '切换体感组 gyro'],
+  ['__custom__', '自定义 / 键盘（用 ⌨ 录制组合键）'],
+];
+
+const AXIS_TARGET_OPTIONS = [
+  ['__inherit__', '继承默认（留空）'],
+  ['none', '关闭（none）'],
+  ['mouse:x', '鼠标左右方向（mouse:x）'],
+  ['mouse:y', '鼠标上下方向（mouse:y）'],
+  ['xbox:abs_x', '手柄轴 ABS_X'],
+  ['xbox:abs_y', '手柄轴 ABS_Y'],
+  ['xbox:abs_rx', '手柄轴 ABS_RX'],
+  ['xbox:abs_ry', '手柄轴 ABS_RY'],
+  ['xbox:abs_z', '手柄扳机 ABS_Z'],
+  ['xbox:abs_rz', '手柄扳机 ABS_RZ'],
+  ['wheel:up', '滚轮上'], ['wheel:down', '滚轮下'],
+  ['keypair', '两个方向各一个按键（keypair）'],
+  ['__custom__', '自定义（键盘/鼠标键阈值等）'],
 ];
 
 const MODIFIERS = {
@@ -310,6 +364,36 @@ document.addEventListener('contextmenu', event => {
   if (Date.now() - mouseMenuGuard < 600) event.preventDefault();
 }, true);
 
+function targetSelect(input, options) {
+  const select = el('select', {class: 'target-preset',
+                               title: '鼠标/手柄目标从这里选；键盘用 ⌨ 录制'});
+  for (const [value, label] of options) {
+    select.append(el('option', {value}, label));
+  }
+  const sync = () => {
+    const value = input.value.trim();
+    if (!value) select.value = '__inherit__';
+    else if (options.some(option => option[0] === value)) {
+      select.value = value;
+    } else {
+      select.value = '__custom__';
+    }
+  };
+  select.addEventListener('change', () => {
+    if (select.value === '__custom__') {
+      input.focus();
+      return;
+    }
+    input.value = select.value === '__inherit__' ? '' : select.value;
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    sync();
+  });
+  input.addEventListener('input', sync);
+  input._syncTarget = sync;
+  sync();
+  return select;
+}
+
 function captureButton(input) {
   const button = el('button', {class: 'small', type: 'button',
                                title: '按键盘、手柄或鼠标按键录制'}, '⌨🎮🖱');
@@ -365,12 +449,13 @@ function buildAxisCard(profile, axis) {
   head.append(el('span', {class: 'cur'}));
   card.append(head);
 
-  const targetRow = el('div', {class: 'row'});
+  const targetRow = el('div', {class: 'row target-row'});
   targetRow.append(el('label', {}, '目标'));
   const target = el('input', {type: 'text', class: 'axis-target',
                               placeholder: 'none'});
   target.value = axis.value ? axis.value.target : '';
   target.addEventListener('input', () => updateCard(card));
+  targetRow.append(targetSelect(target, AXIS_TARGET_OPTIONS));
   targetRow.append(target);
   targetRow.append(captureButton(target));
   card.append(targetRow);
@@ -407,6 +492,7 @@ function buildAxisCard(profile, axis) {
       if (input.type === 'checkbox') input.checked = !!(d && d[f]);
       else input.value = d && d[f] !== undefined ? d[f] : '';
     });
+    if (target._syncTarget) target._syncTarget();
     updateCard(card);
   });
   actions.append(reset);
@@ -431,6 +517,7 @@ function buildPanel(profile, index) {
   const passLabel = el('label', {class: 'inline'});
   const pass = el('input', {type: 'checkbox', class: 'passthrough-check'});
   pass.checked = !!profile.passthrough;
+  passLabel.title = '勾选：未显式映射的标准输入原样转发；取消：只输出显式映射'
   passLabel.append(pass, document.createTextNode(' 标准输入原样透传'));
   head.append(passLabel);
 
@@ -441,7 +528,9 @@ function buildPanel(profile, index) {
     const checkbox = el('input', {type: 'checkbox', class: 'group-check',
                                   'data-group': groupName});
     checkbox.checked = !!groups[groupName];
-    label.append(checkbox, document.createTextNode(' 组 ' + groupName));
+    label.title = '该组启动时默认开启/关闭；可用 toggle:' + groupName + ' 运行时切换'
+    label.append(checkbox, document.createTextNode(
+      ' 组 ' + groupName + ' 初始开启'));
     groupBox.append(label);
   }
   if (groupBox.children.length) head.append(groupBox);
@@ -454,7 +543,7 @@ function buildPanel(profile, index) {
   });
 
   panel.append(el('div', {class: 'section'},
-                  '按钮映射（留空 = 继承默认；⌨🎮🖱 可直接按键盘/手柄/鼠标录制，长按会保持按下）'));
+                  '按钮映射（鼠标/手柄用下拉选；⌨ 录制键盘，支持组合键；长按保持按下）'));
   const grid = el('div', {class: 'btn-grid'});
   for (const btn of profile.buttons) {
     const row = el('div', {class: 'btnrow'});
@@ -463,6 +552,7 @@ function buildPanel(profile, index) {
     input.value = btn.value || '';
     input.placeholder = btn.default ? '继承默认: ' + btn.default
                                     : '继承默认: ' + btn.hint;
+    row.append(targetSelect(input, BUTTON_TARGET_OPTIONS));
     row.append(input);
     row.append(captureButton(input));
     row.append(el('div', {class: 'hint'}, '当前: ' + btn.hint));
@@ -471,7 +561,7 @@ function buildPanel(profile, index) {
   panel.append(grid);
 
   panel.append(el('div', {class: 'section'},
-                  '轴 / 传感器（留空=继承默认；目标填 none 关闭）'));
+                  '轴 / 传感器（鼠标方向用下拉选；键盘阈值可点 ⌨；留空=继承默认）'));
   const axes = el('div', {class: 'axes'});
   for (const axis of profile.axes) axes.append(buildAxisCard(profile, axis));
   panel.append(axes);
@@ -581,8 +671,7 @@ document.getElementById('save').addEventListener('click', async () => {
     });
     const data = await response.json();
     if (data.ok) {
-      setStatus('已保存到 ' + data.path + '，重启 daemon 生效', 'ok');
-      setTimeout(() => location.reload(), 800);
+      setStatus('已保存到 ' + data.path + '；编辑器正在退出，可以关闭页面。', 'ok');
     } else {
       setStatus('保存失败：\n' + (data.errors || []).join('\n'), 'err');
     }
