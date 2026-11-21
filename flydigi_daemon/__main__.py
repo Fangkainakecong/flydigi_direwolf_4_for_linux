@@ -66,7 +66,7 @@ def build_parser():
                      help='输出路径（默认 config/calibration.json）')
 
     rel = sub.add_parser('release',
-                         help='释放 XTEST 卡住的按键/鼠标按钮（Deskflow 等）')
+                         help='释放 XTEST 卡住的按键/鼠标按钮（通用清理）')
     rel.add_argument('--dry-run', action='store_true',
                      help='只打印，不实际注入释放事件')
     rel.add_argument('--display', default=None, help='X display（默认 $DISPLAY）')

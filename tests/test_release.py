@@ -7,19 +7,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-SCRIPTS = os.path.join(ROOT, 'scripts')
-if SCRIPTS not in sys.path:
-    sys.path.insert(0, SCRIPTS)
-
 from flydigi_daemon import xrelease            # noqa: E402
-import deskflow_release_watch as watcher       # noqa: E402
-
-
-def test_has_connection():
-    text = ('0 0 192.168.5.120:47876 192.168.5.110:24800\n'
-            '0 0 192.168.5.120:22 192.168.5.110:5555\n')
-    assert watcher.has_connection(text)
-    assert not watcher.has_connection('0 0 10.0.0.1:22 10.0.0.2:5555\n')
 
 
 def test_release_without_display_errors():
