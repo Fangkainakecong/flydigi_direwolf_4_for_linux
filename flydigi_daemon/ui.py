@@ -134,7 +134,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 2, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
