@@ -358,7 +358,9 @@ function buildPanel(profile, index) {
   const head = el('div', {class: 'profile-head'});
   head.append(el('span', {class: 'slot'},
                  profile.slot ? '槽 ' + profile.slot + '/4' : '自定义'));
-  const name = el('input', {type: 'text', class: 'profile-name'});
+  head.append(el('span', {class: 'meta'}, '配置名'));
+  const name = el('input', {type: 'text', class: 'profile-name',
+                           placeholder: '配置名'});
   name.value = profile.name;
   head.append(name);
   const passLabel = el('label', {class: 'inline'});
