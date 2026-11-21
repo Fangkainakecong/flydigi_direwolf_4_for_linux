@@ -128,11 +128,41 @@ def test_button_override_and_pad_target():
     assert frame.keys == frozenset({ecodes.KEY_SPACE}), frame.keys
 
 
+def test_button_hold_keeps_key_down():
+    mapper = Mapper(profile({'a': 'key:space'}))
+    first = mapper.apply(raw(buttons={'a'}), 0.0)
+    second = mapper.apply(raw(buttons={'a'}), 0.01)
+    assert first.keys == frozenset({ecodes.KEY_SPACE})
+    assert second.keys == frozenset({ecodes.KEY_SPACE})
+    released = mapper.apply(raw(), 0.02)
+    assert released.keys == frozenset()
+
+
+def test_axis_threshold_to_pad_button():
+    mapper = Mapper(profile({'axis': {'lt': {
+        'target': 'xbox:lb', 'threshold': 0.5,
+    }}}))
+    high = mapper.apply(raw(triggers=(200, 0)), 0.0)
+    assert 'lb' in high.pad.buttons, high.pad.buttons
+    low = mapper.apply(raw(triggers=(50, 0)), 0.01)
+    assert 'lb' not in low.pad.buttons, low.pad.buttons
+
+
 def test_key_combo_and_aliases():
     mapper = Mapper(profile({'a': 'key:ctrl+shift+esc'}))
     frame = mapper.apply(raw(buttons={'a'}), 0.0)
     assert frame.keys == frozenset({
         ecodes.KEY_LEFTCTRL, ecodes.KEY_LEFTSHIFT, ecodes.KEY_ESC}), frame.keys
+
+
+def test_button_key_stays_held_until_release():
+    """按住手柄键 = 一直按住映射的键盘键，不是只发一次按下。"""
+    mapper = Mapper(profile({'a': 'key:space'}))
+    down = raw(buttons={'a'})
+    assert mapper.apply(down, 0.0).keys == frozenset({ecodes.KEY_SPACE})
+    assert mapper.apply(down, 0.5).keys == frozenset({ecodes.KEY_SPACE})
+    assert mapper.apply(down, 2.0).keys == frozenset({ecodes.KEY_SPACE})
+    assert mapper.apply(raw(buttons=set()), 2.1).keys == frozenset()
 
 
 def test_mouse_button_and_wheel_edge():

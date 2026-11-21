@@ -155,8 +155,11 @@ def parse_axis_target(text):
         name = low[5:]
         if name in PAD_AXIS_INDEX:
             return Target('pad_axis', name)
+        name = PAD_ALIASES.get(name, name)
+        if name in PAD_BUTTONS:
+            return Target('pad', name)
         raise ConfigError('轴目标 %r 无效；手柄轴请用 abs_x/abs_y/abs_rx/'
-                          'abs_ry/abs_z/abs_rz' % (text,))
+                          'abs_ry/abs_z/abs_rz，按钮用 xbox:a/b/...' % (text,))
     try:
         target = parse_button_target(text)
     except ConfigError:
@@ -361,8 +364,8 @@ def lint_config(cfg):
                 warnings.append('[profile.%s.axis.%s] 体感轴需要先运行 '
                                 'calibrate 生成校准文件'
                                 % (name, rule.axis))
-            if rule.target.kind in ('key', 'mouse_button', 'wheel') and \
-                    not (0 < rule.threshold < 1):
+            if rule.target.kind in ('key', 'mouse_button', 'wheel', 'pad') \
+                    and not (0 < rule.threshold < 1):
                 errors.append('[profile.%s.axis.%s] threshold 必须在 0..1'
                               % (name, rule.axis))
             if rule.target.kind == 'wheel' and \
@@ -561,7 +564,7 @@ class Mapper(object):
                 self._apply_gyro(rule, value, dt)
             else:
                 self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
-                                 keys, mouse)
+                                 pad_buttons, keys, mouse)
                 wheel += self._axis_wheel(rule, value, now, dt)
                 self._apply_keypair(rule, value, pad_buttons, keys, mouse)
 
@@ -641,7 +644,7 @@ class Mapper(object):
         return 0
 
     def _apply_axis(self, rule, value, dt, pad_axes, pad_triggers,
-                    keys, mouse):
+                    pad_buttons, keys, mouse):
         target = rule.target
         if target.kind == 'mouse_move':
             if not dt or value == 0.0:
@@ -659,14 +662,16 @@ class Mapper(object):
                 pad_axes[idx] = raw
             else:
                 pad_triggers[idx] = int(round(_clamp(value, 0.0, 1.0) * 255))
-        elif target.kind in ('key', 'mouse_button'):
+        elif target.kind in ('key', 'mouse_button', 'pad'):
             if rule.invert:
                 value = -value
             if abs(value) >= rule.threshold:
                 if target.kind == 'key':
                     keys.update(target.value)
-                else:
+                elif target.kind == 'mouse_button':
                     mouse.add(target.value)
+                else:
+                    pad_buttons.add(target.value)
 
     def _apply_gyro(self, rule, value, dt):
         """角速度积分：counts/秒 × dt ÷ counts_per_degree × 灵敏度。"""
@@ -896,7 +901,7 @@ def describe_axis(rule, short=False):
             params.append('释放 %.2f' % rule.release_threshold)
             if rule.repeat_hz:
                 params.append('连发 %g Hz' % rule.repeat_hz)
-    elif rule.target.kind in ('key', 'mouse_button'):
+    elif rule.target.kind in ('key', 'mouse_button', 'pad'):
         params.append('阈值 %.2f' % rule.threshold)
     elif rule.target.kind == 'pad_axis':
         if rule.invert:

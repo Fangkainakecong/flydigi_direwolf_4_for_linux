@@ -90,12 +90,30 @@ def axis_dict(rule):
     }
 
 
+def _referenced_groups(profile):
+    """配置文件里出现过的组名：显式初值 + 按钮/轴上的 group。"""
+    if profile is None:
+        return set()
+    names = set(profile.groups)
+    names.update(rule.group for rule in profile.buttons.values()
+                 if rule.group)
+    names.update(rule.group for rule in profile.axes.values() if rule.group)
+    return names
+
+
 def build_model(cfg):
     default_cfg = cfgmod.load(cfgmod.DEFAULT_PATH)
     default_profiles = mapping.parse_config(default_cfg)
     effective = mapping.parse_config(cfg)
     # 只编辑四槽实际引用的 profile；改名后不要显示 default 里的旧名字。
     order = [name for name in cfgmod.slot_profiles(cfg) if name in effective]
+
+    # 组是 profile 之间共享的名字（例如 gyro）。把任意 profile 用到的组
+    # 都列到每一页，这样每个配置都能设置自己的初值，而不是只有显式写了
+    # [profile.X.groups] 的那一页才有勾选框。
+    all_groups = set()
+    for profile in list(effective.values()) + list(default_profiles.values()):
+        all_groups.update(_referenced_groups(profile))
 
     profiles = []
     for name in order:
@@ -121,7 +139,7 @@ def build_model(cfg):
                          if axis in eff.axes else '—'),
             })
         slots = cfgmod.slot_profiles(cfg)
-        group_names = sorted(set(eff.groups) | set(dft.groups if dft else {}))
+        group_names = sorted(all_groups)
         profiles.append({
             'original': name,
             'name': name,
@@ -134,7 +152,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 2, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 3, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +398,7 @@ def make_handler(model, cfg):
             data = body.encode('utf-8')
             self.send_response(code)
             self.send_header('Content-Type', content_type + '; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
             self.send_header('Content-Length', str(len(data)))
             self.end_headers()
             self.wfile.write(data)

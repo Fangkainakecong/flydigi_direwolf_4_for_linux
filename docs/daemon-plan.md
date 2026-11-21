@@ -831,7 +831,8 @@ jstest /dev/input/jsN
   `config/mappings.html`（四槽分页、按钮卡片 + 轴参数）
 - `edit`：本地网页编辑器（仅 127.0.0.1），四套配置分页；**配置名可改**，
   保存时同步 `slot_profiles`/`startup_profile`；按钮/轴/透传/组全可编辑；
-  键盘目标点 ⌨ 后直接按键录制（组合键、Esc/F1–F24/小键盘/媒体键）；
+  目标旁的 ⌨🎮🖱 分别录制键盘/手柄/鼠标按键（组合键、Esc/F1–F24、
+  小键盘、媒体键、手柄标准键、鼠标左右中侧键），长按保持输出按下；
   保存只写与 `default.toml` 不同的字段到 `config/user.toml`，自动留 `.bak`；
   右上角电池图标读取 daemon/check 写入的 `/var/lib/flydigi/status.json`
 - 尚未包含：宏（按需再做）；**连发/涡轮由板载固件负责，daemon 不做**

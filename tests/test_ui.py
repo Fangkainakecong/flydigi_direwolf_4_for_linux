@@ -35,6 +35,13 @@ def test_model_has_buttons_and_axes():
     assert desktop['original'] == 'desktop'
     assert desktop['passthrough'] is False
     assert desktop['groups'] == {'gyro': False}
+    # 组是全局概念：四个配置都显示 gyro，默认 true
+    assert [p['groups'] for p in model['profiles']] == [
+        {'gyro': True}, {'gyro': False}, {'gyro': True}, {'gyro': True}]
+    # 组是跨 profile 共享的；每一页都应该能设置自己的 gyro 初值。
+    for profile in model['profiles']:
+        assert 'gyro' in profile['groups'], profile['name']
+    assert model['profiles'][0]['groups']['gyro'] is True
 
 
 def test_dump_toml_roundtrip():

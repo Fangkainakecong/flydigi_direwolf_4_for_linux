@@ -112,9 +112,10 @@ button.primary:disabled { opacity: .5; cursor: default; }
 
 <div class="capture-overlay" id="capture">
   <div class="capture-box">
-    <b>按下键盘按键…</b>
-    <small>组合键直接按（如 Ctrl+Shift+Esc）；单独按修饰键也可以。<br>
-          点击空白处或“取消”退出。</small>
+    <b>按下键盘、手柄或鼠标按键…</b>
+    <small>键盘组合键直接按（如 Ctrl+Shift+Esc），单独按修饰键也可以。<br>
+          手柄按钮和鼠标键同样可以捕获；手柄需要浏览器能看到<br>
+          （daemon 未接管，或当前配置是透传）。点击框外或“取消”退出。</small>
     <button class="small" id="capture-cancel">取消</button>
   </div>
 </div>
@@ -191,12 +192,35 @@ function keyForEvent(event) {
   return null;
 }
 
+const GAMEPAD_BUTTONS = {
+  0: 'a', 1: 'b', 2: 'x', 3: 'y', 4: 'lb', 5: 'rb',
+  8: 'back', 9: 'start', 10: 'l3', 11: 'r3',
+  12: 'up', 13: 'down', 14: 'left', 15: 'right', 16: 'home',
+};
+const MOUSE_BUTTONS = ['left', 'middle', 'right', 'side', 'extra'];
+
 let capture = null;
 const overlay = document.getElementById('capture');
 
+function gamepadBaseline() {
+  const base = {};
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (let p = 0; p < pads.length; p++) {
+    const pad = pads[p];
+    if (!pad) continue;
+    base[pad.index] = new Set();
+    for (let i = 0; i < pad.buttons.length; i++) {
+      if (pad.buttons[i].pressed) base[pad.index].add(i);
+    }
+  }
+  return base;
+}
+
 function startCapture(input) {
-  capture = {input, mods: [], active: new Set()};
+  capture = {input, mods: [], active: new Set(),
+             padBaseline: gamepadBaseline()};
   overlay.classList.add('show');
+  requestAnimationFrame(pollGamepad);
 }
 
 function stopCapture() {
@@ -204,14 +228,38 @@ function stopCapture() {
   overlay.classList.remove('show');
 }
 
-function finishCapture(combo) {
+function finishCapture(value) {
   if (!capture) return;
   const input = capture.input;
-  input.value = 'key:' + combo;
+  input.value = value;
   input.dispatchEvent(new Event('input', {bubbles: true}));
   const card = input.closest('.axis-card');
   if (card) updateCard(card);
   stopCapture();
+}
+
+function pollGamepad() {
+  if (!capture) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (let p = 0; p < pads.length; p++) {
+    const pad = pads[p];
+    if (!pad) continue;
+    const base = capture.padBaseline[pad.index] || new Set();
+    for (let i = 0; i < pad.buttons.length; i++) {
+      const pressed = pad.buttons[i].pressed;
+      if (base.has(i)) {
+        if (!pressed) base.delete(i);
+        continue;
+      }
+      if (!pressed) continue;
+      const name = GAMEPAD_BUTTONS[i];
+      if (name) {
+        finishCapture('xbox:' + name);
+        return;
+      }
+    }
+  }
+  requestAnimationFrame(pollGamepad);
 }
 
 document.addEventListener('keydown', event => {
@@ -226,7 +274,7 @@ document.addEventListener('keydown', event => {
   }
   const key = keyForEvent(event);
   if (!key) return;
-  finishCapture(capture.mods.concat([key]).join('+'));
+  finishCapture('key:' + capture.mods.concat([key]).join('+'));
 }, true);
 
 document.addEventListener('keyup', event => {
@@ -237,7 +285,7 @@ document.addEventListener('keyup', event => {
   event.stopPropagation();
   capture.active.delete(mod);
   if (capture.active.size === 0 && capture.mods.length) {
-    finishCapture(capture.mods.join('+'));
+    finishCapture('key:' + capture.mods.join('+'));
   }
 }, true);
 
@@ -246,9 +294,25 @@ overlay.addEventListener('click', event => {
 });
 document.getElementById('capture-cancel').addEventListener('click', stopCapture);
 
+let mouseMenuGuard = 0;
+document.addEventListener('mousedown', event => {
+  if (!capture) return;
+  const target = event.target;
+  if (target === overlay) return;                    // 点空白 = 取消
+  if (target instanceof Element && target.closest('#capture-cancel')) return;
+  if (event.button < 0 || event.button >= MOUSE_BUTTONS.length) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.button === 2) mouseMenuGuard = Date.now();
+  finishCapture('mouse:' + MOUSE_BUTTONS[event.button]);
+}, true);
+document.addEventListener('contextmenu', event => {
+  if (Date.now() - mouseMenuGuard < 600) event.preventDefault();
+}, true);
+
 function captureButton(input) {
   const button = el('button', {class: 'small', type: 'button',
-                               title: '按键盘按键录制'}, '⌨');
+                               title: '按键盘、手柄或鼠标按键录制'}, '⌨🎮🖱');
   button.addEventListener('click', () => startCapture(input));
   return button;
 }
@@ -262,7 +326,8 @@ function axisKind(card, target) {
   if (low.startsWith('wheel:')) return 'wheel';
   if (low.startsWith('xbox:abs_')) return 'padaxis';
   if (low === 'none' || low === '') return 'none';
-  if (low.startsWith('key:') || low.startsWith('mouse:')) return 'threshold';
+  if (low.startsWith('key:') || low.startsWith('mouse:') ||
+      low.startsWith('xbox:')) return 'threshold';
   return 'other';
 }
 
@@ -388,7 +453,8 @@ function buildPanel(profile, index) {
                       (name.value.trim() || '(未命名)');
   });
 
-  panel.append(el('div', {class: 'section'}, '按钮映射（留空 = 继承默认）'));
+  panel.append(el('div', {class: 'section'},
+                  '按钮映射（留空 = 继承默认；⌨🎮🖱 可直接按键盘/手柄/鼠标录制，长按会保持按下）'));
   const grid = el('div', {class: 'btn-grid'});
   for (const btn of profile.buttons) {
     const row = el('div', {class: 'btnrow'});
