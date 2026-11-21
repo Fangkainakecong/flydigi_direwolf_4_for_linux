@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞智冰原狼4 · 映射编辑器</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px 28px 80px; background: #12151c; color: #dce3ee;
+       font: 14px/1.5 -apple-system, "Segoe UI", "Noto Sans CJK SC", sans-serif; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.meta { color: #8b97ab; font-size: 12px; }
+.tabs { display: flex; gap: 8px; margin: 18px 0 14px; flex-wrap: wrap; }
+.tab { background: #1d2330; color: #aab6c8; border: 1px solid #2c3546;
+       border-radius: 8px; padding: 7px 14px; cursor: pointer; font-size: 13px; }
+.tab.active { background: #2b6cb0; border-color: #2b6cb0; color: #fff; }
+.panel { display: none; }
+.panel.active { display: block; }
+.panel h2 { font-size: 16px; margin: 14px 0 10px; }
+.section { margin: 20px 0 8px; font-size: 13px; color: #9fb0c7;
+           text-transform: uppercase; letter-spacing: .06em; }
+.btn-grid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr));
+            gap: 8px; }
+.btnrow { display: grid; grid-template-columns: 78px 1fr; gap: 8px;
+          align-items: center; background: #1a202b; border: 1px solid #273043;
+          border-radius: 8px; padding: 7px 9px; }
+.btnrow label { color: #8b97ab; font-size: 12px; }
+.btnrow .hint { grid-column: 2; color: #6f7c93; font-size: 11px; }
+input[type=text], input[type=number] { width: 100%; background: #10141c;
+       border: 1px solid #2c3546; border-radius: 6px; color: #dce3ee;
+       padding: 5px 7px; font: inherit; font-size: 13px; }
+input:focus { outline: 1px solid #4d9cff; border-color: #4d9cff; }
+.axes { display: grid; grid-template-columns: repeat(2, minmax(320px, 1fr));
+        gap: 10px; }
+.axis-card { background: #1a202b; border: 1px solid #273043; border-radius: 10px;
+             padding: 10px 12px; }
+.axis-head { display: flex; justify-content: space-between; align-items: center;
+             margin-bottom: 7px; }
+.axis-head b { font-size: 13px; }
+.axis-head .cur { color: #6f7c93; font-size: 11px; }
+.row { display: grid; grid-template-columns: 96px 1fr; gap: 8px;
+       align-items: center; margin: 5px 0; }
+.row label { color: #8593a8; font-size: 12px; }
+.fields .hidden { display: none; }
+.axis-actions { display: flex; gap: 8px; justify-content: flex-end;
+                margin-top: 8px; }
+button.small { background: #22304a; color: #a9c7ff; border: 1px solid #2e4468;
+               border-radius: 6px; padding: 3px 9px; cursor: pointer;
+               font-size: 11px; }
+button.primary { background: #2b6cb0; color: #fff; border: 0;
+                 border-radius: 8px; padding: 9px 18px; cursor: pointer;
+                 font-size: 14px; }
+button.primary:disabled { opacity: .5; cursor: default; }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; background: #171d27;
+           border-top: 1px solid #273043; padding: 10px 28px;
+           display: flex; gap: 16px; align-items: center; }
+#status { font-size: 13px; color: #8b97ab; }
+#status.ok { color: #6ee7a8; }
+#status.err { color: #ff8f8f; white-space: pre-wrap; }
+</style></head>
+<body>
+<h1>飞智冰原狼4 · 映射编辑器</h1>
+<div class="meta">保存到 <code>config/user.toml</code>，只写与默认配置不同的字段；改完重启 daemon 生效。</div>
+<div class="tabs" id="tabs"></div>
+<div id="panels"></div>
+
+<div class="savebar">
+  <button class="primary" id="save">保存到 user.toml</button>
+  <span id="status">未修改</span>
+</div>
+
+<script>
+const MODEL = __MODEL__;
+const AXIS_FIELDS = [
+  ['group', '组', 'text'],
+  ['deadzone', '死区 0..1', 'number'],
+  ['curve', '曲线', 'number'],
+  ['max_speed', '满推 px/s', 'number'],
+  ['sensitivity', '灵敏度 px/°', 'number'],
+  ['smoothing', '平滑', 'number'],
+  ['deadband', '体感死区 raw', 'number'],
+  ['max_hz', '滚轮格/秒（比例）', 'number'],
+  ['threshold', '阈值（固定/按键）', 'number'],
+  ['release_threshold', '释放阈值', 'number'],
+  ['repeat_hz', '固定连发 Hz（比例=0）', 'number'],
+  ['neg', '负向目标', 'text'],
+  ['pos', '正向目标', 'text'],
+];
+
+function el(tag, attrs, text) {
+  const node = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    if (k === 'class') node.className = attrs[k];
+    else if (k === 'dataset') Object.assign(node.dataset, attrs[k]);
+    else node.setAttribute(k, attrs[k]);
+  }
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function axisKind(card, target) {
+  const low = (target || '').toLowerCase();
+  if (low === 'keypair') return 'keypair';
+  if (low === 'mouse:x' || low === 'mouse:y' || low === 'mouse:move') {
+    return card.dataset.axis.startsWith('gyro') ? 'gyro' : 'stick';
+  }
+  if (low.startsWith('wheel:')) return 'wheel';
+  if (low.startsWith('xbox:abs_')) return 'padaxis';
+  if (low === 'none' || low === '') return 'none';
+  if (low.startsWith('key:') || low.startsWith('mouse:')) return 'threshold';
+  return 'other';
+}
+
+function visibleFields(kind) {
+  if (kind === 'gyro') return ['sensitivity', 'smoothing', 'deadband',
+                               'invert', 'group'];
+  if (kind === 'stick') return ['deadzone', 'curve', 'max_speed', 'invert',
+                                'group'];
+  if (kind === 'wheel') return ['deadzone', 'max_hz', 'curve', 'invert',
+                                'threshold', 'release_threshold', 'repeat_hz',
+                                'group'];
+  if (kind === 'keypair') return ['neg', 'pos', 'deadzone', 'curve', 'invert',
+                                  'group'];
+  if (kind === 'threshold') return ['threshold', 'group'];
+  if (kind === 'padaxis') return ['invert', 'group'];
+  return [];
+}
+
+function updateCard(card) {
+  const target = card.querySelector('.axis-target').value;
+  const kind = axisKind(card, target);
+  const show = new Set(visibleFields(kind));
+  card.querySelectorAll('.f-field').forEach(row => {
+    row.classList.toggle('hidden', !show.has(row.dataset.field));
+  });
+  card.querySelector('.cur').textContent = target || '未映射';
+}
+
+function buildAxisCard(profile, axis) {
+  const card = el('div', {class: 'axis-card'});
+  card.dataset.axis = axis.axis;
+  card.dataset.default = JSON.stringify(axis.default);
+  card.dataset.profile = profile.name;
+  const head = el('div', {class: 'axis-head'});
+  head.append(el('b', {}, axis.label));
+  head.append(el('span', {class: 'cur'}));
+  card.append(head);
+
+  const targetRow = el('div', {class: 'row'});
+  targetRow.append(el('label', {}, '目标'));
+  const target = el('input', {type: 'text', class: 'axis-target',
+                              list: 'targets', placeholder: 'none'});
+  target.value = axis.value ? axis.value.target : '';
+  target.addEventListener('input', () => updateCard(card));
+  targetRow.append(target);
+  card.append(targetRow);
+
+  const fields = el('div', {class: 'fields'});
+  for (const [field, label, type] of AXIS_FIELDS) {
+    if (field === 'invert') continue;
+    const row = el('div', {class: 'row f-field'});
+    row.dataset.field = field;
+    row.append(el('label', {}, label));
+    const input = el('input', {type, 'data-field': field, step: 'any'});
+    const value = axis.value ? axis.value[field] : undefined;
+    if (value !== undefined && value !== null) input.value = value;
+    row.append(input);
+    fields.append(row);
+  }
+  const inv = el('div', {class: 'row f-field'});
+  inv.dataset.field = 'invert';
+  inv.append(el('label', {}, '反向'));
+  const checkbox = el('input', {type: 'checkbox', 'data-field': 'invert'});
+  if (axis.value && axis.value.invert) checkbox.checked = true;
+  inv.append(checkbox);
+  fields.append(inv);
+  card.append(fields);
+
+  const actions = el('div', {class: 'axis-actions'});
+  const reset = el('button', {class: 'small'}, '继承默认');
+  reset.addEventListener('click', () => {
+    const d = axis.default;
+    target.value = d ? d.target : '';
+    card.querySelectorAll('[data-field]').forEach(input => {
+      const f = input.dataset.field;
+      if (input.type === 'checkbox') input.checked = !!(d && d[f]);
+      else input.value = d && d[f] !== undefined ? d[f] : '';
+    });
+    updateCard(card);
+  });
+  actions.append(reset);
+  card.append(actions);
+  updateCard(card);
+  return card;
+}
+
+function buildPanel(profile) {
+  const panel = el('section', {class: 'panel'});
+  panel.dataset.profile = profile.name;
+  panel.append(el('h2', {}, profile.name +
+                  (profile.slot ? ` · 槽 ${profile.slot}/4` : '')));
+
+  panel.append(el('div', {class: 'section'}, '按钮映射（留空 = 继承默认）'));
+  const grid = el('div', {class: 'btn-grid'});
+  for (const btn of profile.buttons) {
+    const row = el('div', {class: 'btnrow'});
+    row.append(el('label', {}, btn.label));
+    const input = el('input', {type: 'text', list: 'targets',
+                               'data-source': btn.source});
+    input.value = btn.value || '';
+    input.placeholder = btn.default ? '继承默认: ' + btn.default
+                                    : '继承默认: ' + btn.hint;
+    row.append(input);
+    row.append(el('div', {class: 'hint'}, '当前: ' + btn.hint));
+    grid.append(row);
+  }
+  panel.append(grid);
+
+  panel.append(el('div', {class: 'section'},
+                  '轴 / 传感器（留空=继承默认；目标填 none 关闭）'));
+  const axes = el('div', {class: 'axes'});
+  for (const axis of profile.axes) axes.append(buildAxisCard(profile, axis));
+  panel.append(axes);
+  return panel;
+}
+
+const tabs = document.getElementById('tabs');
+const panels = document.getElementById('panels');
+MODEL.profiles.forEach((profile, index) => {
+  const tab = el('button', {class: 'tab' + (index === 0 ? ' active' : '')},
+                 (profile.slot ? profile.slot + '/4 · ' : '') + profile.name);
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('p-' + profile.name).classList.add('active');
+  });
+  tabs.append(tab);
+  const panel = buildPanel(profile);
+  panel.id = 'p-' + profile.name;
+  if (index === 0) panel.classList.add('active');
+  panels.append(panel);
+});
+
+const datalist = el('datalist', {id: 'targets'});
+MODEL.targets.forEach(t => datalist.append(el('option', {value: t})));
+document.body.append(datalist);
+
+function collect() {
+  const profiles = {};
+  document.querySelectorAll('.panel').forEach(panel => {
+    const name = panel.dataset.profile;
+    const buttons = {};
+    panel.querySelectorAll('.btn-target, input[data-source]').forEach(input => {
+      buttons[input.dataset.source] = input.value.trim();
+    });
+    const axes = {};
+    panel.querySelectorAll('.axis-card').forEach(card => {
+      const target = card.querySelector('.axis-target').value.trim();
+      if (!target) return;
+      const value = {target};
+      card.querySelectorAll('[data-field]').forEach(input => {
+        const field = input.dataset.field;
+        if (input.type === 'checkbox') value[field] = input.checked;
+        else if (input.type === 'text') value[field] = input.value.trim();
+        else if (input.value !== '') value[field] = parseFloat(input.value);
+      });
+      axes[card.dataset.axis] = value;
+    });
+    profiles[name] = {buttons, axes};
+  });
+  return {profiles};
+}
+
+const status = document.getElementById('status');
+function setStatus(text, cls) {
+  status.textContent = text;
+  status.className = cls || '';
+}
+
+document.querySelectorAll('.panel input').forEach(input => {
+  input.addEventListener('input', () => {
+    if (!status.classList.contains('err')) setStatus('有未保存的修改');
+  });
+});
+
+document.getElementById('save').addEventListener('click', async () => {
+  setStatus('保存中…');
+  try {
+    const response = await fetch('/api/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(collect()),
+    });
+    const data = await response.json();
+    if (data.ok) setStatus('已保存到 ' + data.path + '，重启 daemon 生效', 'ok');
+    else setStatus('保存失败：\n' + (data.errors || []).join('\n'), 'err');
+  } catch (err) {
+    setStatus('保存失败：' + err, 'err');
+  }
+});
+</script>
+</body></html>

@@ -826,6 +826,9 @@ jstest /dev/input/jsN
   模板 `config/user.example.toml`，不进 git
 - `show`：终端打印四套映射表；`show --html [--open]` 生成自包含
   `config/mappings.html`（四槽分页、按钮卡片 + 轴参数）
+- `edit`：本地网页编辑器（仅 127.0.0.1），四套配置分页编辑按钮和所有轴参数；
+  保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`，
+  自动留 `.bak`，不影响其它段
 - 尚未包含：宏（按需再做）；**连发/涡轮由板载固件负责，daemon 不做**
 - 体感轴（`gyro_x/gyro_y`）留到 M4
 

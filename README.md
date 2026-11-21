@@ -144,6 +144,25 @@ curve = 1.5
 
 `show --html` 生成 `config/mappings.html`（自包含单文件，不进 git），
 四个槽各一页，按钮卡片 + 轴参数表，改完重新生成即可。
+
+### 可视化编辑器（改映射不用手写 TOML）
+
+```bash
+python3 -m flydigi_daemon edit
+```
+
+会启动只监听 `127.0.0.1:8765` 的本地网页并自动打开浏览器（`--port` 换端口，
+`--no-open` 不自动打开）。四套配置分页，每个物理键、每个轴（摇杆/扳机/体感）
+的目标和全部参数都能直接改：
+
+- 按钮：目标字符串，留空 = 继承默认，`none` = 关闭
+- 摇杆：`deadzone` / `curve` / `max_speed` / `invert`
+- 扳机滚轮：`deadzone` / `max_hz` / `curve`（比例）或 `threshold` / `repeat_hz`（固定）
+- 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
+- 所有轴都可带 `group`
+
+保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
+`.bak`），不会覆盖默认配置。改完重启 daemon 生效。
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 

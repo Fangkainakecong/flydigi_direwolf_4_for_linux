@@ -18,7 +18,17 @@ python3 tests/test_m2.py                 # 离线回归（SELECT+ABXY 四槽仲�
 python3 tests/test_m3.py                 # 离线回归（映射 DSL）
 python3 tests/test_show.py               # 映射可视化 / user.toml 覆盖
 python3 tests/test_m4.py                 # 体感积分 / 标定数学
+python3 tests/test_ui.py                 # 可视化编辑器 / user.toml 生成
 ```
+
+可视化编辑器（本地网页）：
+
+```bash
+python3 -m flydigi_daemon edit           # 127.0.0.1:8765, 自动开浏览器
+python3 -m flydigi_daemon edit --no-open --port 8800
+```
+
+保存只写与 `default.toml` 不同的字段到 `config/user.toml`；旧文件会留 `.bak`。
 
 体感标定（需要手柄，约 15 秒）：
 

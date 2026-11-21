@@ -17,7 +17,7 @@ from . import mapping
 def build_parser():
     ap = argparse.ArgumentParser(
         prog='flydigi-daemon',
-        description='飞智冰原狼4 Linux daemon（M4：体感标定）')
+        description='飞智冰原狼4 Linux daemon（M4 + 可视化映射编辑器）')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     c = sub.add_parser('check', help='识别设备并审计当前板载槽')
@@ -65,6 +65,13 @@ def build_parser():
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 
+    ed = sub.add_parser('edit', help='启动本地网页映射编辑器')
+    ed.add_argument('--config', default=None)
+    ed.add_argument('--port', type=int, default=8765,
+                    help='本地端口（默认 8765，仅监听 127.0.0.1）')
+    ed.add_argument('--no-open', action='store_true',
+                    help='不自动打开浏览器')
+
     sh = sub.add_parser('show', help='打印映射表 / 生成可视化 HTML')
     sh.add_argument('--config', default=None)
     sh.add_argument('--profile', default=None, help='只看某个 profile')
@@ -94,6 +101,9 @@ def main(argv=None):
         if args.cmd == 'calibrate':
             from .calibrate import run as calibrate_run
             return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
+        if args.cmd == 'edit':
+            from .ui import run as ui_run
+            return ui_run(cfg, args)
         if args.cmd == 'show':
             from .show import run as show_run
             return show_run(cfg, args)
