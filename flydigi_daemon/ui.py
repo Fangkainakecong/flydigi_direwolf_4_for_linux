@@ -267,7 +267,7 @@ def save_overrides(default_cfg, posted, user_path, existing=None):
                 pass
         os.replace(tmp, user_path)
         return True, []
-    except (mapping.ConfigError, OSError) as exc:
+    except (mapping.ConfigError, OSError, ValueError, TypeError) as exc:
         return False, [str(exc)]
 
 
@@ -316,8 +316,11 @@ def make_handler(model):
                                             'errors': [str(exc)]}),
                            'application/json')
                 return
-            ok, errors = save_overrides(cfgmod.load(cfgmod.DEFAULT_PATH),
-                                        posted, cfgmod.USER_PATH)
+            try:
+                ok, errors = save_overrides(cfgmod.load(cfgmod.DEFAULT_PATH),
+                                            posted, cfgmod.USER_PATH)
+            except Exception as exc:            # noqa: BLE001
+                ok, errors = False, ['保存失败：%r' % (exc,)]
             payload = {'ok': ok, 'errors': errors,
                        'path': cfgmod.USER_PATH}
             self._send(200 if ok else 400, json.dumps(payload),
