@@ -9,6 +9,7 @@
 * 回放：`--replay <capture.bin>`，不需要手柄，适合离线回归/调试
 """
 
+import atexit
 import signal
 import struct
 import time
@@ -29,7 +30,11 @@ def _fmt_elapsed(seconds):
 def _install_stop_handler(flag):
     def handler(signum, frame):        # noqa: ARG001
         flag['running'] = False
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    signals = [signal.SIGINT, signal.SIGTERM]
+    for name in ('SIGHUP', 'SIGQUIT'):
+        if hasattr(signal, name):
+            signals.append(getattr(signal, name))
+    for sig in signals:
         signal.signal(sig, handler)
 
 
@@ -99,6 +104,7 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
 
         if not dry_run:
             devs = Devices(cfg)
+            atexit.register(devs.close)
             print('虚拟设备:')
             _print_devices(devs)
             print('提示：物理手柄已由 daemon 独占；Steam/RetroArch 用虚拟手柄。')
@@ -131,11 +137,14 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         print('当前配置: %s（槽 %d/%d）'
               % (start_profile, ctrl.slot + 1, len(ctrl.profiles)))
 
-        watchdog = float(cfgmod.safety_section(cfg).get('watchdog_ms', 1500)) / 1000.0
+        safety = cfgmod.safety_section(cfg)
+        watchdog = float(safety.get('watchdog_ms', 1500)) / 1000.0
+        release_after = float(safety.get('input_timeout_ms', 400)) / 1000.0
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
         last_reset = 0.0
+        gap_released = False
         prev = mapper.out
         prev_extras = frozenset()
         while flag['running']:
@@ -144,6 +153,15 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             got = pad.reap()
             if got is None:
                 now = time.time()
+                # 手柄休眠/2.4G 掉线时，虚拟键盘/鼠标不能保持按下状态。
+                if not gap_released and now - link.last_data > release_after:
+                    if devs is not None:
+                        devs.release_all()
+                    mapper.reset()
+                    prev = mapper.out
+                    gap_released = True
+                    print('⚠ %.1f s 没有输入，已释放所有按键/鼠标'
+                          % (now - link.last_data))
                 flushed = ctrl.tick(now)
                 if flushed is not None:
                     frame = mapper.apply(flushed, now)
@@ -170,6 +188,9 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             if not data:
                 continue
             link.last_data = time.time()
+            if gap_released:
+                gap_released = False
+                print('输入恢复')
             if len(data) < 32 or rep.is_reply(data):
                 continue
             state = translate(data)

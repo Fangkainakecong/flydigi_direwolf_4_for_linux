@@ -301,8 +301,11 @@ t0+0..200ms   等待窗口（Back 暂不输出）
 ### 5.3 防卡键
 
 - 所有输出都经过一个 `OutputState`，记录当前按下的键和引用计数。
-- 切槽、组关闭、panic、SIGTERM、异常退出（`atexit` + 信号）都调用
-  `release_all()`：键盘全 up、鼠标键全 up、手柄轴回中、再 `SYN`。
+- 切槽、组关闭、panic、SIGTERM/SIGHUP/SIGQUIT、异常退出（`atexit` + 信号）
+  都调用 `release_all()`：强制键盘全 up、鼠标键全 up、手柄轴回中、再 `SYN`
+  （不依赖内部差量状态，避免状态不同步漏键）。
+- 400 ms 没有输入（手柄休眠/2.4G 掉线）自动释放所有输出，恢复后再按新帧
+  重新按下；`[safety] input_timeout_ms` 可调。
 - 虚拟设备销毁前必须 `release_all()`，否则桌面会留着"按住 Shift"的状态。
 
 ### 5.4 状态持久化

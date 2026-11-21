@@ -166,6 +166,33 @@ python3 -m flydigi_daemon edit
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 
+## 故障排查：Ctrl/Shift 卡住、鼠标左右键错乱
+
+本机实测原因不在手柄：Deskflow 客户端（`192.168.5.110:24800`）通过 **XTEST**
+注入远端键鼠，连接中断时只发了按下、没发松开，X 里就留下 Shift_R/Control_R
+和鼠标 1/3/5 的“幽灵按下”；重启电脑能好，是因为 XTEST 状态在 X 会话里。
+
+不用重启，立即释放：
+
+```bash
+cd ~/projects/flydigi_direwolf_4_for_linux
+python3 -m flydigi_daemon release
+```
+
+可选常驻，断线自动释放：
+
+```bash
+python3 scripts/deskflow_release_watch.py
+```
+
+Deskflow 本身也可以重启/更新（`flatpak kill org.deskflow.deskflow`、
+`flatpak update org.deskflow.deskflow`）。完整证据和说明见
+[docs/findings-input-stuck.md](docs/findings-input-stuck.md)。
+
+daemon 侧也做了防御：400 ms 没有手柄输入就自动释放所有按键/鼠标
+（`[safety] input_timeout_ms`），退出/切配置强制全量松开，并处理
+SIGHUP/SIGQUIT。
+
 ## 关键结论（详见 docs/）
 
 - **老方言帧**：15 字节 `[0]=0xA5 [1]=cmdId [2]=sub`，无校验，写 EP 0x05；

@@ -30,6 +30,14 @@ python3 -m flydigi_daemon edit --no-open --port 8800
 
 保存只写与 `default.toml` 不同的字段到 `config/user.toml`；旧文件会留 `.bak`。
 
+XTEST 卡键清理（Deskflow / xcape / 远程桌面断线）：
+
+```bash
+python3 -m flydigi_daemon release          # 立即释放所有 XTEST 按键/按钮
+python3 -m flydigi_daemon release --dry-run
+python3 scripts/deskflow_release_watch.py  # 断线时自动释放（可选常驻）
+```
+
 体感标定（需要手柄，约 15 秒）：
 
 ```bash

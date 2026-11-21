@@ -69,6 +69,8 @@ release_on_profile_switch = true
 release_all_on_exit = true
 # 超过这个时间没有报文就重置 URB；连续失败则退出交给 systemd 重启。
 watchdog_ms = 1500
+# 超过这个时间没有输入就强制释放所有按键/鼠标（防止手柄休眠/断连后卡键）。
+input_timeout_ms = 400
 # 手柄上的紧急停止：同时按住 Back+Start 1.5 秒，所有注入停止，直到重启 daemon。
 panic_chord = "back+start"
 panic_hold_ms = 1500

@@ -138,8 +138,23 @@ class VirtualGamepad(object):
         return changed
 
     def release_all(self):
-        """松开所有键、回中所有轴。退出/异常/切配置时调用。"""
-        self.apply(EMPTY)
+        """强制松开所有键、回中所有轴。
+
+        不依赖 `cur` 的差量：即使上一次 apply 中途异常导致状态不同步，
+        这里也会把全部按钮/轴写一遍，避免残留按下。
+        """
+        for code in BUTTON_MAP.values():
+            self.ui.write(ecodes.EV_KEY, code, 0)
+        self.ui.write(ecodes.EV_ABS, ecodes.ABS_HAT0X, 0)
+        self.ui.write(ecodes.EV_ABS, ecodes.ABS_HAT0Y, 0)
+        # XInput/xpad 的 Y 轴静止值是 -1（~0），不是 0。
+        neutral_axes = (0, -1, 0, -1)
+        for code, value in zip(AXIS_MAP, neutral_axes):
+            self.ui.write(ecodes.EV_ABS, code, value)
+        for code, value in zip(TRIGGER_MAP, (0, 0)):
+            self.ui.write(ecodes.EV_ABS, code, value)
+        self.ui.syn()
+        self.cur = PadState(axes=neutral_axes, triggers=(0, 0))
 
     def close(self):
         try:
@@ -178,7 +193,11 @@ class VirtualKeyboard(object):
         return True
 
     def release_all(self):
-        self.apply(set())
+        # 全键松开，防止 cur 与实际状态不同步时漏掉某个修饰键。
+        for code in KEYBOARD_KEYS:
+            self.ui.write(ecodes.EV_KEY, code, 0)
+        self.ui.syn()
+        self.cur = set()
 
     def close(self):
         try:
@@ -224,7 +243,10 @@ class VirtualMouse(object):
         return changed
 
     def release_all(self):
-        self.apply()
+        for code in MOUSE_BUTTONS:
+            self.ui.write(ecodes.EV_KEY, code, 0)
+        self.ui.syn()
+        self.cur = set()
 
     def close(self):
         try:

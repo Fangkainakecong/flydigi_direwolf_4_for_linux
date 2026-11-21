@@ -65,6 +65,12 @@ def build_parser():
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 
+    rel = sub.add_parser('release',
+                         help='释放 XTEST 卡住的按键/鼠标按钮（Deskflow 等）')
+    rel.add_argument('--dry-run', action='store_true',
+                     help='只打印，不实际注入释放事件')
+    rel.add_argument('--display', default=None, help='X display（默认 $DISPLAY）')
+
     ed = sub.add_parser('edit', help='启动本地网页映射编辑器')
     ed.add_argument('--config', default=None)
     ed.add_argument('--port', type=int, default=8765,
@@ -85,7 +91,7 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    cfg = cfgmod.load(args.config)
+    cfg = cfgmod.load(getattr(args, 'config', None))
 
     errors, warnings = mapping.lint_config(cfg)
     if args.cmd != 'show':
@@ -101,6 +107,9 @@ def main(argv=None):
         if args.cmd == 'calibrate':
             from .calibrate import run as calibrate_run
             return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
+        if args.cmd == 'release':
+            from .xrelease import run as release_run
+            return release_run(args)
         if args.cmd == 'edit':
             from .ui import run as ui_run
             return ui_run(cfg, args)
