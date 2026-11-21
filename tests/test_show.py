@@ -36,25 +36,29 @@ def test_views_default():
 
 def test_text_render():
     views = show.build_views(config.load())
-    text = show.render_text(views, 'config/default.toml')
+    text = show.render_text(views, 'config/default.toml', '未标定')
     assert 'desktop' in text and 'key:space' in text
     assert 'SELECT+B' in text
     assert 'passthrough=on' in text
     assert '原样（xbox:abs_z）' in text
+    assert '体感标定: 未标定' in text
 
 
 def test_html_render_and_write():
     views = show.build_views(config.load())
-    page = show.render_html(views, 'config/default.toml')
+    page = show.render_html(views, 'config/default.toml',
+                            calibration_label='未标定')
     assert page.startswith('<!doctype html>')
     assert page.count('<section') == 4
     assert 'data-panel="p-desktop"' in page
     assert 'key:space' in page
     with tempfile.TemporaryDirectory() as tmp:
         path = show.write_html(os.path.join(tmp, 'm.html'), views,
-                               'config/default.toml')
+                               'config/default.toml',
+                               calibration_label='未标定')
         assert os.path.exists(path)
         assert open(path, encoding='utf-8').read() == page
+    assert '体感标定' in page
 
 
 def test_user_overlay_deep_merge():

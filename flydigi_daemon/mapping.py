@@ -16,12 +16,16 @@
   注释一致；写回手柄时再转成 evdev 的 `~value`。
 """
 
+import json
+import os
 import time
 from dataclasses import dataclass, field, replace
 
 from evdev import ecodes
 
 from .translate import EMPTY, PadState, invert16
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # ---------------------------------------------------------------------------
 # 名字表
@@ -177,6 +181,9 @@ class AxisRule:
     repeat_hz: float = 0.0
     neg: Target = None
     pos: Target = None
+    sensitivity: float = 1.0
+    smoothing: float = 0.0
+    deadband: float = 0.0
 
 
 @dataclass
@@ -218,6 +225,9 @@ def parse_axis_rule(name, data):
     if 'target' not in data:
         raise ConfigError('[axis.%s] 缺少 target' % (name,))
     target = parse_axis_target(data['target'])
+    if name.startswith('gyro') and target.kind != 'mouse_move':
+        raise ConfigError('[axis.%s] 体感轴目前只能映射 mouse:x 或 mouse:y'
+                          % (name,))
     rule = AxisRule(axis=name, target=target,
                     group=data.get('group'),
                     invert=bool(data.get('invert', False)))
@@ -233,6 +243,12 @@ def parse_axis_rule(name, data):
         rule.release_threshold = float(data['release_threshold'])
     if 'repeat_hz' in data:
         rule.repeat_hz = float(data['repeat_hz'])
+    if 'sensitivity' in data:
+        rule.sensitivity = float(data['sensitivity'])
+    if 'smoothing' in data:
+        rule.smoothing = float(data['smoothing'])
+    if 'deadband' in data:
+        rule.deadband = float(data['deadband'])
 
     if target.kind == 'keypair':
         for side in ('neg', 'pos'):
@@ -308,6 +324,12 @@ def parse_config(cfg):
 def lint_config(cfg):
     """返回 (errors, warnings)，给 `check` 和启动前使用。"""
     errors, warnings = [], []
+    cal_path = (cfg.get('calibration') or {}).get('file') or \
+        'config/calibration.json'
+    cal_path = os.path.expanduser(str(cal_path))
+    if not os.path.isabs(cal_path):
+        cal_path = os.path.join(ROOT, cal_path)
+    cal_ok = os.path.exists(cal_path)
     names = cfg.get('daemon', {}).get('slot_profiles', [])
     if len(names) != 4:
         errors.append('daemon.slot_profiles 必须正好 4 项，当前 %d 项'
@@ -324,8 +346,9 @@ def lint_config(cfg):
             errors.append(str(exc))
             continue
         for rule in profile.axes.values():
-            if rule.axis.startswith('gyro'):
-                warnings.append('[profile.%s.axis.%s] 体感轴要等 M4 标定后生效'
+            if rule.axis.startswith('gyro') and not cal_ok:
+                warnings.append('[profile.%s.axis.%s] 体感轴需要先运行 '
+                                'calibrate 生成校准文件'
                                 % (name, rule.axis))
             if rule.target.kind in ('key', 'mouse_button', 'wheel') and \
                     not (0 < rule.threshold < 1):
@@ -347,6 +370,38 @@ def gate_errors(cfg):
 # ---------------------------------------------------------------------------
 # 运行时
 # ---------------------------------------------------------------------------
+GYRO_CAL_KEYS = {'gyro_x': 'yaw', 'gyro_y': 'pitch', 'gyro_z': 'roll'}
+
+
+def load_calibration(path):
+    """读 calibrate 生成的 JSON；不存在/损坏返回 None。"""
+    if not path:
+        return None
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def calibration_axis(calibration, axis):
+    """取出某个体感轴的 counts_per_degree / sign；未标定返回 None。"""
+    if not calibration:
+        return None
+    section = calibration.get(GYRO_CAL_KEYS.get(axis, ''))
+    if not isinstance(section, dict):
+        return None
+    try:
+        cpd = float(section.get('counts_per_degree') or 0)
+        sign = float(section.get('sign', 1))
+    except (TypeError, ValueError):
+        return None
+    if cpd <= 0:
+        return None
+    return {'counts_per_degree': cpd, 'sign': sign}
+
+
 @dataclass
 class FrameState:
     pad: PadState = EMPTY
@@ -393,7 +448,13 @@ def axis_norm(axis, raw):
         return raw.triggers[0] / 255.0
     if axis == 'rt':
         return raw.triggers[1] / 255.0
-    return 0.0                     # 体感轴等 M4 接上
+    if axis == 'gyro_x':
+        return float(raw.gyro[0])
+    if axis == 'gyro_y':
+        return float(raw.gyro[1])
+    if axis == 'gyro_z':
+        return float(raw.gyro[2])
+    return 0.0
 
 
 def key_order(code):
@@ -401,9 +462,10 @@ def key_order(code):
 
 
 class Mapper(object):
-    def __init__(self, profile, devices=None, clock=None):
+    def __init__(self, profile, devices=None, clock=None, calibration=None):
         self.devices = devices
         self.clock = clock or time.monotonic
+        self.calibration = calibration or {}
         self.profile = profile
         self.groups = {}
         self.acc = {}
@@ -452,6 +514,10 @@ class Mapper(object):
             name = rule.target.value
             self.groups[name] = not self.groups.get(name, True)
             toggled.append((name, self.groups[name]))
+            # 组状态变了，体感平滑器清零，避免切换瞬间跳一下。
+            for other in self.profile.axes.values():
+                if other.axis.startswith('gyro'):
+                    self.axis_state.pop(id(other), None)
 
         pad = self._build_pad(raw)
         pad_buttons = set(pad.buttons)
@@ -474,10 +540,13 @@ class Mapper(object):
             value = axis_norm(axis, raw)
             if not self._active(rule.group):
                 value = 0.0
-            self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
-                             keys, mouse)
-            wheel += self._axis_wheel(rule, value, now)
-            self._apply_keypair(rule, value, pad_buttons, keys, mouse)
+            if axis.startswith('gyro'):
+                self._apply_gyro(rule, value, dt)
+            else:
+                self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
+                                 keys, mouse)
+                wheel += self._axis_wheel(rule, value, now)
+                self._apply_keypair(rule, value, pad_buttons, keys, mouse)
 
         dx, dy = self._flush_mouse()
         pad = PadState(buttons=frozenset(pad_buttons), hat=pad.hat,
@@ -573,6 +642,25 @@ class Mapper(object):
                     keys.update(target.value)
                 else:
                     mouse.add(target.value)
+
+    def _apply_gyro(self, rule, value, dt):
+        """角速度积分：counts/秒 × dt ÷ counts_per_degree × 灵敏度。"""
+        if rule.target.kind != 'mouse_move' or dt <= 0:
+            return
+        params = calibration_axis(self.calibration, rule.axis)
+        if params is None:
+            return
+        value *= params['sign']
+        if abs(value) < rule.deadband:
+            value = 0.0
+        state = self.axis_state.setdefault(id(rule), {'ema': 0.0})
+        alpha = _clamp(rule.smoothing, 0.0, 0.99)
+        ema = alpha * state['ema'] + (1.0 - alpha) * value
+        state['ema'] = ema
+        if rule.invert:
+            ema = -ema
+        degrees = (ema * dt) / params['counts_per_degree']
+        self.acc['mouse:' + rule.target.value] += degrees * rule.sensitivity
 
     def _axis_wheel(self, rule, value, now):
         if rule.target.kind != 'wheel':
@@ -746,7 +834,13 @@ def describe_axis(rule, short=False):
     if short:
         return base
     params = []
-    if rule.target.kind == 'mouse_move':
+    if rule.axis.startswith('gyro'):
+        params.append('灵敏度 %g px/°' % rule.sensitivity)
+        if rule.smoothing:
+            params.append('平滑 %g' % rule.smoothing)
+        if rule.deadband:
+            params.append('死区 %g' % rule.deadband)
+    elif rule.target.kind == 'mouse_move':
         params.append('死区 %.2f' % rule.deadzone)
         if rule.curve != 1.0:
             params.append('曲线 %.1f' % rule.curve)

@@ -17,7 +17,7 @@ from . import mapping
 def build_parser():
     ap = argparse.ArgumentParser(
         prog='flydigi-daemon',
-        description='飞智冰原狼4 Linux daemon（M3：映射 DSL）')
+        description='飞智冰原狼4 Linux daemon（M4：体感标定）')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     c = sub.add_parser('check', help='识别设备并审计当前板载槽')
@@ -39,6 +39,19 @@ def build_parser():
                    help='回放最多处理多少帧')
     r.add_argument('--profile', default=None,
                    help='临时用指定 profile 启动（不读 state.json）')
+    r.add_argument('--calibration', default=None,
+                   help='体感标定文件（默认 config/calibration.json）')
+
+    cal = sub.add_parser('calibrate', help='标定体感（静置 + 360° + 90°）')
+    cal.add_argument('--config', default=None)
+    cal.add_argument('--still', type=float, default=3.0,
+                     help='静置采样秒数（默认 3）')
+    cal.add_argument('--yaw-seconds', type=float, default=6.0,
+                     help='水平旋转采样窗口（默认 6 秒）')
+    cal.add_argument('--pitch-seconds', type=float, default=4.0,
+                     help='俯仰采样窗口（默认 4 秒）')
+    cal.add_argument('--output', default=None,
+                     help='输出路径（默认 config/calibration.json）')
 
     sh = sub.add_parser('show', help='打印映射表 / 生成可视化 HTML')
     sh.add_argument('--config', default=None)
@@ -66,6 +79,9 @@ def main(argv=None):
         return 2
 
     try:
+        if args.cmd == 'calibrate':
+            from .calibrate import run as calibrate_run
+            return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
         if args.cmd == 'show':
             from .show import run as show_run
             return show_run(cfg, args)
@@ -77,9 +93,10 @@ def main(argv=None):
             return run_replay(cfg, args.replay, dry_run=args.dry_run,
                               realtime=args.realtime,
                               max_frames=args.max_frames,
-                              profile=args.profile)
+                              profile=args.profile,
+                              calibration=args.calibration)
         return run_live(cfg, dry_run=args.dry_run, seconds=args.seconds,
-                        profile=args.profile)
+                        profile=args.profile, calibration=args.calibration)
     except PermissionError as exc:
         print('权限不足：%s' % exc)
         print('用 sudo 运行，或先配置 udev 规则（M6）。')

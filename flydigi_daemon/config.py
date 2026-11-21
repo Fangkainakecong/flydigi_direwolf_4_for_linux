@@ -74,6 +74,16 @@ def state_file(cfg):
     return os.path.expanduser(path) if path else default_state_path()
 
 
+def calibration_file(cfg):
+    """`[calibration] file`，相对路径按仓库根目录解析。"""
+    path = (cfg.get('calibration', {}).get('file')
+            or 'config/calibration.json')
+    path = os.path.expanduser(str(path))
+    if not os.path.isabs(path):
+        path = os.path.join(ROOT, path)
+    return path
+
+
 def device_section(cfg):
     dev = cfg.get('device', {})
     return {

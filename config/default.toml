@@ -60,7 +60,8 @@ enable_byte = 7
 rate_hz = 50
 
 [calibration]
-# 由 flydigi_gyro_calibrate.py 生成（含 counts_per_degree / noise / update_rate）。
+# 由 `python3 -m flydigi_daemon calibrate` 生成
+# （含 counts_per_degree / sign / noise / update_rate_hz）。
 file = "config/calibration.json"
 
 [safety]
@@ -128,6 +129,8 @@ deadzone = 0.12
 curve = 2.0
 max_speed = 1200
 
+# 体感：先跑 `sudo python3 -m flydigi_daemon calibrate` 生成
+# config/calibration.json，否则这里不会产生移动。
 [profile.desktop.axis.gyro_x]
 target = "mouse:x"
 group = "gyro"

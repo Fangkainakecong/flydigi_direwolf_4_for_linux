@@ -30,6 +30,7 @@ class PadState:
     axes: tuple = (0, 0, 0, 0)          # (lx, ly, rx, ry)，evdev 语义
     triggers: tuple = (0, 0)            # (lt, rt)，0..255
     extras: frozenset = frozenset()     # m1/m2/fn/turbo
+    gyro: tuple = (0, 0, 0)             # int8 角速度，yaw/pitch/roll
 
     def is_empty(self):
         return (not self.buttons and self.hat == (0, 0)
@@ -72,6 +73,7 @@ def translate(data):
         axes=axes,
         triggers=(d['lt'], d['rt']),
         extras=frozenset(extras),
+        gyro=tuple(d['gyro']),
     )
 
 

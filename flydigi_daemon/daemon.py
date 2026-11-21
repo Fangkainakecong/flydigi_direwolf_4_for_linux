@@ -42,6 +42,22 @@ def _print_devices(devs):
         print('  %-3s %-18s %s' % (role, node, dev.name))
 
 
+def _load_mapper(cfg, profiles, name, devices, calibration_path=None):
+    """建 Mapper 并加载体感标定；只在一处打印状态。"""
+    uses_gyro = any(axis.startswith('gyro')
+                    for profile in profiles.values()
+                    for axis in profile.axes)
+    path = calibration_path or cfgmod.calibration_file(cfg)
+    cal = mapping.load_calibration(path) if uses_gyro else None
+    if uses_gyro:
+        if cal:
+            print('体感标定: %s（更新率 %s Hz）'
+                  % (path, cal.get('update_rate_hz', '?')))
+        else:
+            print('体感: 未标定（%s 不存在，先运行 calibrate）' % path)
+    return mapping.Mapper(profiles[name], devices=devices, calibration=cal)
+
+
 def _make_slots(cfg, persist=True, on_switch=None):
     d = cfgmod.daemon_section(cfg)
     profiles = cfgmod.slot_profiles(cfg) or ['default']
@@ -57,7 +73,8 @@ def _make_slots(cfg, persist=True, on_switch=None):
     )
 
 
-def run_live(cfg, dry_run=False, seconds=None, profile=None):
+def run_live(cfg, dry_run=False, seconds=None, profile=None,
+             calibration=None):
     devcfg = cfgmod.device_section(cfg)
     dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
     if not dev:
@@ -97,8 +114,10 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None):
             print('✗ profile %r 不在配置里（可用：%s）'
                   % (start_profile, ', '.join(sorted(profiles))))
             return 1
-        mapper = mapping.Mapper(profiles[start_profile],
-                                devices=None if dry_run else devs)
+        mapper = _load_mapper(cfg, profiles, start_profile,
+                              None if dry_run else devs, calibration)
+        if mapper is None:
+            return 1
 
         def on_switch(index, name, letter):
             if devs is not None:
@@ -216,7 +235,7 @@ def load_capture(path):
 
 
 def run_replay(cfg, path, dry_run=False, realtime=False,
-               max_frames=None, profile=None):
+               max_frames=None, profile=None, calibration=None):
     """回放抓包，不需要 USB/root（dry-run 时连 uinput 都不建）。"""
     frames = load_capture(path)
     print('回放: %s（%d 帧%s）'
@@ -236,8 +255,10 @@ def run_replay(cfg, path, dry_run=False, realtime=False,
     if start_profile not in profiles:
         raise SystemExit('profile %r 不在配置里（可用：%s）'
                          % (start_profile, ', '.join(sorted(profiles))))
-    mapper = mapping.Mapper(profiles[start_profile],
-                            devices=None if dry_run else devs)
+    mapper = _load_mapper(cfg, profiles, start_profile,
+                          None if dry_run else devs, calibration)
+    if mapper is None:
+        raise SystemExit('体感标定文件读取失败')
 
     def on_switch(index, name, letter):
         if devs is not None:

@@ -823,11 +823,20 @@ jstest /dev/input/jsN
 
 - 验收：任意按钮映射到任意目标；`.bin` 回放断言通过
 
-### M4：体感与标定
+### M4：体感与标定（代码完成，待标定/硬件验收）
 
-- yaw/pitch 积分 → 鼠标；死区、灵敏度、`+左摇杆` 相加
-- `flydigi-gyro-calibrate`：静止 3 s + 水平 360° + 俯仰 90°，写 `calibration.json`
-- Home 按下沿切换 `gyro` 组，短震反馈
+实现：`flydigi_daemon/calibrate.py` + `mapping.py` 的 `_apply_gyro`；
+`tests/test_m4.py` 15 项离线全过。
+
+- 轴向沿用实测：yaw→`gyro_x`、pitch→`gyro_y`、roll→`gyro_z`（弱）
+- 积分用零阶保持：`px += v × dt ÷ counts_per_degree × sensitivity`
+  （报文 1 kHz、角速度约 89 Hz，重复值保持到下一拍）
+- `calibrate`：静置 3 s（噪声 RMS）→ 水平 360° → 低头 90°；自动挑主导轴、
+  判断符号，动作不对会要求重做；写 `config/calibration.json`（不进 git）
+- 桌面配置里 Home 按下沿切换 `gyro` 组；组关闭时条目归零并释放
+- 体感与左摇杆映射到同一个 `mouse:x/y`，输出自然**相加**
+- 平滑（EMA）、死区、灵敏度、反向都在 `[profile.*.axis.gyro_*]`
+- 短震反馈等 M5 接上 FF 后补；现在是终端打印 `[group] gyro=on/off`
 - 验收：桌面全局可移动/点击；360° 标定可复现
 
 ### M5：震动透传

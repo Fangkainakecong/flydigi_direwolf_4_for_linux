@@ -34,6 +34,8 @@ AXIS_ROWS = [
     ('LT', 'lt'), ('RT', 'rt'),
     ('左摇杆 X', 'lx'), ('左摇杆 Y', 'ly'),
     ('右摇杆 X', 'rx'), ('右摇杆 Y', 'ry'),
+    ('体感 yaw', 'gyro_x'), ('体感 pitch', 'gyro_y'),
+    ('体感 roll', 'gyro_z'),
 ]
 
 AXIS_TO_PAD = {
@@ -105,12 +107,14 @@ def _groups_text(groups):
                      for name, value in sorted(groups.items()))
 
 
-def render_text(views, config_label):
+def render_text(views, config_label, calibration_label=None):
     lines = ['映射预览  配置: %s' % config_label]
     slots = ['%s=%s' % ('ABXY'[view.slot - 1], view.name)
              for view in views if view.slot]
     if slots:
         lines.append('槽位: ' + '  '.join(slots))
+    if calibration_label:
+        lines.append('体感标定: ' + calibration_label)
     lines.append('')
     for view in views:
         head = '── %s' % view.name
@@ -167,7 +171,8 @@ def _panel(view):
         cards=cards, axis_rows=axis_rows)
 
 
-def render_html(views, config_label, user_label=None):
+def render_html(views, config_label, user_label=None,
+                calibration_label=None):
     tabs = ''.join(
         '<button class="tab%s" data-panel="p-%s">%s · %s</button>'
         % (' active' if i == 0 else '', _esc(view.name),
@@ -178,6 +183,8 @@ def render_html(views, config_label, user_label=None):
                  if user_label else
                  '<div class="meta">个人覆盖: 未使用（可创建 config/user.toml）</div>')
     generated = time.strftime('%Y-%m-%d %H:%M:%S')
+    cal_line = ('<div class="meta">体感标定: %s</div>'
+                % _esc(calibration_label)) if calibration_label else ''
     return """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -225,6 +232,7 @@ tr.none td {{ color: #6b7488; }}
 <h1>飞智冰原狼4 · 映射</h1>
 <div class="meta">配置: {config}</div>
 {user_line}
+{cal_line}
 <div class="meta">生成于 {generated} · 修改 config/user.toml 后重新运行 show</div>
 <div class="tabs">{tabs}</div>
 {panels}
@@ -243,15 +251,17 @@ document.querySelectorAll('.tab').forEach(function (button) {{
 </script>
 </body></html>
 """.format(config=_esc(config_label), user_line=user_line,
-           generated=generated, tabs=tabs, panels=panels)
+           generated=generated, tabs=tabs, panels=panels, cal_line=cal_line)
 
 
-def write_html(path, views, config_label, user_label=None):
+def write_html(path, views, config_label, user_label=None,
+               calibration_label=None):
     folder = os.path.dirname(os.path.abspath(path))
     if folder:
         os.makedirs(folder, exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
-        f.write(render_html(views, config_label, user_label))
+        f.write(render_html(views, config_label, user_label,
+                            calibration_label))
     return os.path.abspath(path)
 
 
@@ -265,12 +275,17 @@ def run(cfg, args):
     config_label = 'config/default.toml'
     if os.path.exists(cfgmod.USER_PATH):
         config_label += ' + config/user.toml'
+    cal = mapping.load_calibration(cfgmod.calibration_file(cfg))
+    if cal:
+        cal_label = '已加载（更新率 %s Hz）' % cal.get('update_rate_hz', '?')
+    else:
+        cal_label = '未标定（运行 calibrate 生成）'
     if not args.quiet:
-        print(render_text(views, config_label))
+        print(render_text(views, config_label, cal_label))
     if args.html is not None:
         path = write_html(args.html, views, config_label,
                           'config/user.toml' if os.path.exists(cfgmod.USER_PATH)
-                          else None)
+                          else None, cal_label)
         print('已生成: %s' % path)
         if args.open:
             webbrowser.open('file://' + path)

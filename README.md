@@ -40,7 +40,9 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
   滚轮、组开关），`SELECT+ABXY` 之上叠加 per-profile 映射；
   新增 `config/user.toml` 个人覆盖层和 `show` 可视化；
   `tests/test_m3.py` + `tests/test_show.py` 共 24 项离线全过
-- ⏳ 体感→鼠标（M4）、FF 透传（M5）尚未实现；宏按需再加
+- 🟡 **M4 代码完成，待标定/硬件验收**：体感积分 → 鼠标、`calibrate` 三步标定、
+  Home 切换 gyro 组；`tests/test_m4.py` 15 项离线全过
+- ⏳ FF 震动透传（M5）尚未实现；宏按需再加
   （**连发由板载负责**，daemon 不做软件连发）
 
 ### 快速开始
@@ -84,6 +86,27 @@ python3 -m flydigi_daemon show --html --open  # 生成并打开可视化页面
 sudo python3 -m flydigi_daemon check          # 校验 + 板载槽审计
 sudo python3 -m flydigi_daemon run
 ```
+
+### 体感 → 鼠标
+
+首次使用先标定（会短暂独占手柄）：
+
+```bash
+sudo python3 -m flydigi_daemon calibrate
+```
+
+按提示做三步：静置 3 秒 → 水平转整整 360° → 低头约 90°。产物是
+`config/calibration.json`（不进 git）。之后在 `desktop` 配置里按 **Home**
+开/关体感；灵敏度/平滑/死区在 `config/user.toml` 里改：
+
+```toml
+[profile.desktop.axis.gyro_x]
+sensitivity = 1.0     # 像素/度
+smoothing = 0.35
+deadband = 1.5        # 小于这个 raw 角速度视为噪声
+```
+
+体感会和左摇杆**相加**，两者都映射到 `mouse:x/y`，不需要二选一。
 
 `show --html` 生成 `config/mappings.html`（自包含单文件，不进 git），
 四个槽各一页，按钮卡片 + 轴参数表，改完重新生成即可。

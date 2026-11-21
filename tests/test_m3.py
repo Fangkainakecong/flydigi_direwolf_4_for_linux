@@ -53,7 +53,7 @@ def test_parse_default_config():
     cfg = config.load()
     errors, warnings = lint_config(cfg)
     assert errors == [], errors
-    assert all('M4' in w for w in warnings), warnings
+    assert all('calibrate' in w for w in warnings), warnings
     profiles = parse_config(cfg)
     assert set(profiles) == {'gamepad', 'desktop', 'media', 'passthrough'}
     assert profiles['desktop'].buttons['a'].target.value == (ecodes.KEY_SPACE,)

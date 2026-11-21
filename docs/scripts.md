@@ -17,7 +17,17 @@ python3 tests/test_m1.py                 # 离线回归（报文 → 状态）
 python3 tests/test_m2.py                 # 离线回归（SELECT+ABXY 四槽仲裁）
 python3 tests/test_m3.py                 # 离线回归（映射 DSL）
 python3 tests/test_show.py               # 映射可视化 / user.toml 覆盖
+python3 tests/test_m4.py                 # 体感积分 / 标定数学
 ```
+
+体感标定（需要手柄，约 15 秒）：
+
+```bash
+sudo python3 -m flydigi_daemon calibrate
+# 静置 3s -> 水平转 360° -> 低头 90°，写 config/calibration.json
+```
+
+之后 `desktop` 配置按 Home 开关体感；`show` 顶部会显示标定是否已加载。
 
 配置预览与可视化：
 
