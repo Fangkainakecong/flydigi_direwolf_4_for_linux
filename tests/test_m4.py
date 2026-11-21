@@ -55,8 +55,24 @@ def test_deskew_gyro_wrap():
     assert deskew_gyro(125, -124) == 132
     assert deskew_gyro(-128, 120) == -136
     assert deskew_gyro(125, 120) == 120
-    assert deskew_gyro(20, -10) == -10          # 真实反向经过小值
+    assert deskew_gyro(10, -10) == -10          # 慢速反向：prev 小，不展开
     assert deskew_gyro(None, -124) == -124
+    # 多圈回绕：真实 244 读成 -12，真实 400 读成 -112
+    assert deskew_gyro(300, -12) == 244
+    assert deskew_gyro(400, -112) == 400
+
+
+def test_gyro_multi_wrap_does_not_reverse():
+    p = profile({'axis': {'gyro_x': {
+        'target': 'mouse:x', 'sensitivity': 1,
+        'smoothing': 0, 'deadband': 0}}})
+    cal = {'yaw': {'counts_per_degree': 1.0, 'sign': 1}}
+    mapper = mapping.Mapper(p, calibration=cal)
+    mapper.apply(raw(gyro=(300, 0, 0)), 0.0)
+    # 真实角速度从 300 涨到 400，字节回绕成 -112
+    total = sum(mapper.apply(raw(gyro=(-112, 0, 0)), i * 0.01).dx
+                for i in range(1, 21))
+    assert total > 0, total
 
 
 def test_gyro_wrap_does_not_reverse_mouse():

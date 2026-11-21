@@ -117,18 +117,23 @@ def reply(data):
 
 
 def deskew_gyro(prev, value):
-    """消除 int8 角速度在 ±127 处的回绕。
+    """消除 int8 角速度的 256 回绕（快速转动时的反向/停滞根源）。
 
-    快速转动时固件把超过 +127 的值存成负数（+125 -> -124），直接积分会让
-    鼠标反向。相邻两个样本都接近边界、且跳变接近 256 时，按连续性补回 256。
+    固件把角速度塞进 8 位，超过 ±127 就按 256 回绕：真实 300 可能读成 44，
+    真实 400 读成 -112，真实 244 读成 -12。直接积分会让鼠标反向或突然变慢。
 
-    真实反向会经过 0 附近的小值，不会触发；只有“瞬间从 +120 跳到 -120”
-    这种物理上不可能的跳变才当作回绕。返回可能是 ±(128..255) 的值。
+    做法：只要上一拍还处于"快速"状态（|prev| ≥ 30），就把当前值加上最近的
+    256 倍数，使它与 prev 连续。真实反向会先经过 0 附近；prev 变小时不再
+    强行展开，新的符号被接受。
+
+    返回可能超出 int8（例如 300），这是还原后的角速度，不是原始字节。
     """
-    if (prev is not None and abs(value - prev) > 200
-            and abs(value) > 90 and abs(prev) > 90):
-        return value + 256 if value < prev else value - 256
-    return value
+    if prev is None or abs(prev) < 30:
+        return value
+    turns = int(round((prev - value) / 256.0))
+    if turns:
+        value += 256 * turns
+    return max(-1024, min(1024, value))
 
 
 def norm_axis(value, lo=-32768, hi=32767):
