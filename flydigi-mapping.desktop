@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=飞智手柄映射
+Name[zh_CN]=飞智手柄映射
+Comment=打开本地映射编辑器（127.0.0.1:8765）
+Exec=/usr/bin/python3 -m flydigi_daemon edit
+Path=/home/adrian/projects/flydigi_direwolf_4_for_linux
+Icon=input-gaming
+Terminal=false
+Categories=Settings;
+StartupNotify=false
