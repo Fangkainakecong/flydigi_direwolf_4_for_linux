@@ -116,6 +116,21 @@ def reply(data):
     return data[15], bytes(data[16:32])
 
 
+def deskew_gyro(prev, value):
+    """消除 int8 角速度在 ±127 处的回绕。
+
+    快速转动时固件把超过 +127 的值存成负数（+125 -> -124），直接积分会让
+    鼠标反向。相邻两个样本都接近边界、且跳变接近 256 时，按连续性补回 256。
+
+    真实反向会经过 0 附近的小值，不会触发；只有“瞬间从 +120 跳到 -120”
+    这种物理上不可能的跳变才当作回绕。返回可能是 ±(128..255) 的值。
+    """
+    if (prev is not None and abs(value - prev) > 200
+            and abs(value) > 90 and abs(prev) > 90):
+        return value + 256 if value < prev else value - 256
+    return value
+
+
 def norm_axis(value, lo=-32768, hi=32767):
     """int16 → -1.0..1.0；中点 0 映射到 0。"""
     if value >= 0:

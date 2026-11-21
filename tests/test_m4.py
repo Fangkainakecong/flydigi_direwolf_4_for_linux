@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from flydigi_daemon import calibrate, mapping          # noqa: E402
+from flydigi_daemon.report import deskew_gyro          # noqa: E402
 from flydigi_daemon.calibrate import Sample             # noqa: E402
 from flydigi_daemon.translate import PadState, translate  # noqa: E402
 
@@ -48,6 +49,28 @@ def test_axis_norm_gyro_is_raw():
     state = raw(gyro=(5, -6, 7))
     assert mapping.axis_norm('gyro_x', state) == 5
     assert mapping.axis_norm('gyro_z', state) == 7
+
+
+def test_deskew_gyro_wrap():
+    assert deskew_gyro(125, -124) == 132
+    assert deskew_gyro(-128, 120) == -136
+    assert deskew_gyro(125, 120) == 120
+    assert deskew_gyro(20, -10) == -10          # 真实反向经过小值
+    assert deskew_gyro(None, -124) == -124
+
+
+def test_gyro_wrap_does_not_reverse_mouse():
+    p = profile({'axis': {'gyro_x': {
+        'target': 'mouse:x', 'sensitivity': 1,
+        'smoothing': 0, 'deadband': 0}}})
+    cal = {'yaw': {'counts_per_degree': 1.0, 'sign': 1}}
+    mapper = mapping.Mapper(p, calibration=cal)
+    mapper.apply(raw(gyro=(125, 0, 0)), 0.0)
+    total = 0
+    for i in range(1, 201):
+        value = 125 if (i // 10) % 2 == 0 else -124
+        total += mapper.apply(raw(gyro=(value, 0, 0)), i * 0.01).dx
+    assert total > 0, total
 
 
 def test_gyro_rule_must_target_mouse():
@@ -148,6 +171,12 @@ def test_integrate_and_scale():
     scale = calibrate.scale_from(total, 360)
     assert abs(scale['counts_per_degree'] - 1.0) < 0.01
     assert scale['sign'] == 1
+
+
+def test_integrate_unwraps_fast_rotation():
+    data = samples([(125, 0, 0)] * 100 + [(-124, 0, 0)] * 100)
+    total, _ = calibrate.integrate(data, 0, threshold=0)
+    assert total > 200, total
 
 
 def test_integrate_trims_still_parts():

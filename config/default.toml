@@ -134,14 +134,14 @@ max_speed = 1200
 [profile.desktop.axis.gyro_x]
 target = "mouse:x"
 group = "gyro"
-sensitivity = 1.0          # 像素/度，按手感调
+sensitivity = 4.0          # 像素/度，按手感调（90° = 360 px）
 smoothing = 0.35           # 0=不滤波，越大越稳但越拖
 deadband = 1.5             # 小于这个 raw 值视为噪声
 
 [profile.desktop.axis.gyro_y]
 target = "mouse:y"
 group = "gyro"
-sensitivity = 0.8
+sensitivity = 3.2
 smoothing = 0.35
 deadband = 1.5
 invert = false             # 标定后如果上下反了改成 true

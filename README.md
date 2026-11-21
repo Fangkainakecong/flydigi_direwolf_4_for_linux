@@ -117,7 +117,7 @@ python3 -m flydigi_daemon calibrate --set-yaw 0.67 --sign-pitch -1
 
 ```toml
 [profile.desktop.axis.gyro_x]
-sensitivity = 1.0     # 像素/度
+sensitivity = 4.0     # 像素/度
 smoothing = 0.35
 deadband = 1.5        # 小于这个 raw 角速度视为噪声
 ```

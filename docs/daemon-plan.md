@@ -831,6 +831,9 @@ jstest /dev/input/jsN
 - 轴向沿用实测：yaw→`gyro_x`、pitch→`gyro_y`、roll→`gyro_z`（弱）
 - 积分用零阶保持：`px += v × dt ÷ counts_per_degree × sensitivity`
   （报文 1 kHz、角速度约 89 Hz，重复值保持到下一拍）
+- `report.deskew_gyro()` 处理 int8 在 ±127 处的回绕（+125→-124）：
+  相邻样本都接近边界且跳变 >200 时补 ±256，快速转动不再让鼠标反向
+- 默认灵敏度 4.0/3.2 px/度（90° ≈ 360/288 px），可在 user.toml 调
 - `calibrate`：静置 3 s（噪声 RMS）→ 水平 **3 整圈**（默认，可 `--turns`）→
   低头 90°；自动检测起停、挑主导轴、判符号；yaw/pitch 分别测量后按角度加权，
   差异 >35% 时改用 pitch 兜底（圈数最容易数错），`--strict` 则直接失败；

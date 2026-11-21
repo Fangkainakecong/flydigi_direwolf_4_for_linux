@@ -65,11 +65,13 @@ def integrate(samples, axis, threshold=0.0):
     """
     total = 0.0
     active = 0.0
+    prev_value = None
     for a, b in zip(samples, samples[1:]):
+        value = rep.deskew_gyro(prev_value, a.gyro[axis])
+        prev_value = value
         dt = b.t - a.t
         if dt <= 0 or dt > 0.25:
             continue
-        value = a.gyro[axis]
         if abs(value) < threshold:
             continue
         total += value * dt
@@ -393,7 +395,7 @@ def run(cfg, args, calibration_path):
             print('  已改用低头 90° 的尺度 %.3f。想重测水平：'
                   'sudo ... calibrate --turns 1' % cal['yaw']['counts_per_degree'])
         print('\n桌面配置里 Home 切换体感组；灵敏度用 config/user.toml 调：')
-        print('  [profile.desktop.axis.gyro_x]\n  sensitivity = 1.0')
+        print('  [profile.desktop.axis.gyro_x]\n  sensitivity = 4.0')
         return 0
     finally:
         if link is not None:

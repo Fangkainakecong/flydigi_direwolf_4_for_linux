@@ -23,6 +23,7 @@ from dataclasses import dataclass, field, replace
 
 from evdev import ecodes
 
+from .report import deskew_gyro
 from .translate import EMPTY, PadState, invert16
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -482,6 +483,7 @@ class Mapper(object):
             self.groups.update(groups)
         self.acc = {'mouse:x': 0.0, 'mouse:y': 0.0}
         self.axis_state = {}
+        self.gyro_prev = {}
         self.prev_held = frozenset()
         self.last_now = None
         self.out = FrameState(groups=dict(self.groups))
@@ -489,6 +491,7 @@ class Mapper(object):
     def reset(self):
         self.acc = {'mouse:x': 0.0, 'mouse:y': 0.0}
         self.axis_state = {}
+        self.gyro_prev = {}
         self.prev_held = frozenset()
         self.last_now = None
         self.out = FrameState(groups=dict(self.groups))
@@ -500,6 +503,10 @@ class Mapper(object):
         now = self.clock() if now is None else now
         dt = 0.0 if self.last_now is None else _clamp(now - self.last_now, 0, 0.1)
         self.last_now = now
+
+        gyro = self._deskew_gyro(raw.gyro)
+        if gyro != raw.gyro:
+            raw = replace(raw, gyro=gyro)
 
         held = raw.buttons | raw.extras
         pressed = held - self.prev_held
@@ -562,6 +569,14 @@ class Mapper(object):
         return out
 
     # -- 内部 ------------------------------------------------------------
+    def _deskew_gyro(self, gyro):
+        out = []
+        for axis, value in enumerate(gyro):
+            value = deskew_gyro(self.gyro_prev.get(axis), value)
+            self.gyro_prev[axis] = value
+            out.append(value)
+        return tuple(out)
+
     def _active(self, group):
         if not group:
             return True
