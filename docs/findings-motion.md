@@ -56,6 +56,25 @@ A3 的 `[14]` 是 `[15]` 的 8 倍、A4 的 `[15]` 是 `[14]` 的 10 倍，轴�
 3. 采样率 89 Hz 是固件内部速率，与 1000 Hz 的报文率无关；做鼠标时
    只能按 89 Hz 的有效样本积分。
 
+## 官方参数里有什么（2026-11-21 复核）
+
+结论：**没有可用的物理标定值。**
+
+* 840 字节配置里的体感块（offset 137..144）只有：目标（off/左摇杆/右摇杆/
+  鼠标）、开启键、开启方式、死区、灵敏度 x/y、use mode。出厂值是
+  `deadzone=8`、`sensitivity=(25, 25)`（见
+  `data/txt/factory_fp4_20261119-214700.txt`）。
+* 没有 `counts_per_degree`、零偏或轴符号字段。
+* 上游 openflydigi 的 `flydigi/motion.py` 里 `GYRO_SCALE = 1.0`，注释明确写
+  了 "there is no reference to check Flydigi's LSB-per-deg/s against"；
+  Space Station 的 Gyro→Mouse 是 Windows 端 `KeyboardMouseInjectRunner`
+  用未公开常数做的，配置文件只保存灵敏度/死区偏好。
+* 因此"官方参数"只能影响手感（灵敏度/死区），替代不了物理标定。
+
+本项目的估算值 `13.4 raw·s/°` 来自 A3 阶段（yaw 左右各 45°，共 90°，
+积分约 1206 raw·s），只适合 `calibrate --estimate` 起步，误差约 ±20%。
+要更准就默认的 3 圈标定；拿到数据表/官方常数则用 `--set-yaw` 直接写。
+
 ## 下一次采集怎么做
 
 只跑一个动作即可，脚本里把 A 段换成"慢速横滚"重复 3 次：

@@ -168,6 +168,27 @@ def test_build_calibration():
     assert cal['pitch']['sign'] == -1
 
 
+def test_build_calibration_three_turns_and_pooling():
+    still = samples([(0, 0, 0)] * 100)
+    yaw = samples([(90, 0, 0)] * 1200)            # 90/s × 12 s = 1080°
+    pitch = samples([(0, -30, 0)] * 300)          # -90°
+    cal = calibrate.build_calibration(still, yaw, pitch, turns=3)
+    assert abs(cal['yaw']['counts_per_degree'] - 1.0) < 0.02
+    assert abs(cal['yaw']['measured'] - 1.0) < 0.02
+    assert abs(cal['pitch']['measured'] - 1.0) < 0.02
+    assert cal['turns'] == 3 and cal['source'] == 'gesture'
+
+
+def test_constant_calibration():
+    cal = calibrate.constant_calibration(13.4, sign_pitch=-1,
+                                         source='estimate')
+    assert mapping.calibration_axis(cal, 'gyro_x') == {
+        'counts_per_degree': 13.4, 'sign': 1.0}
+    assert mapping.calibration_axis(cal, 'gyro_y') == {
+        'counts_per_degree': 13.4, 'sign': -1.0}
+    assert cal['source'] == 'estimate'
+
+
 def test_build_calibration_rejects_wrong_axis():
     still = samples([(0, 0, 0)] * 50)
     yaw = samples([(0, 80, 0)] * 400)             # 转到 pitch 去了
@@ -192,6 +213,10 @@ def test_calibration_roundtrip_and_lookup():
             'counts_per_degree': 3.5, 'sign': -1.0}
         assert mapping.calibration_axis(loaded, 'gyro_z') is None
         assert mapping.calibration_axis(None, 'gyro_x') is None
+        # 再写一次必须留下 .bak
+        calibrate.write_calibration(path, {'version': 2})
+        assert os.path.exists(path + '.bak')
+        assert mapping.load_calibration(path + '.bak')['version'] == 1
     assert mapping.load_calibration('/no/such/file.json') is None
 
 

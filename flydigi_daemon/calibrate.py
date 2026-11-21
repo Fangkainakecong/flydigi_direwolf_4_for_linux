@@ -1,4 +1,15 @@
-"""体感标定：静置 → 水平 360° → 俯仰 90°（`flydigi-daemon calibrate`）
+"""体感标定：静置 → 水平多圈 → 俯仰 90°（`flydigi-daemon calibrate`）
+
+官方 Space Station 的 840 字节配置里只有"体感映射/开关/死区/灵敏度"
+（出厂 25/25、死区 8），**没有**陀螺仪的物理标定；上游 openflydigi 也明确
+写了 Flydigi 的 LSB-per-deg/s 没有参考值、只能按手感调。所以 counts/degree
+只能靠测：默认转 **3 整圈**，把起停误差摊到 1080° 上；yaw/pitch 的测量值
+会互相校验，并按角度加权合并。
+
+也支持跳过动作、直接写常数（如果以后找到官方/数据表值）::
+
+    calibrate --set-yaw 13.4 --set-pitch 13.4 --sign-pitch -1
+    calibrate --estimate       # 用 2026-11-19 的 45° 抓包估算值，仅作起步
 
 产物 `config/calibration.json`（不进 git）保存：
 
@@ -16,6 +27,7 @@
 
 import json
 import os
+import shutil
 import time
 from dataclasses import dataclass
 
@@ -25,6 +37,12 @@ from . import usb
 
 YAW_DEGREES = 360.0
 PITCH_DEGREES = 90.0
+DEFAULT_TURNS = 3
+
+# 从 data/txt/motion_20261119-003907.txt 的 A3 阶段估算：
+# yaw 左右各 45°（共 90°），积分约 1206 raw·s -> 13.4 raw·s/°。
+# 动作角度没有量具，误差可能 ±20%，只适合当"不想标定"的起步值。
+ESTIMATED_COUNTS_PER_DEGREE = 13.4
 
 
 @dataclass
@@ -90,10 +108,13 @@ def update_rate(samples):
     return changes / duration
 
 
-def build_calibration(still, yaw_samples, pitch_samples, degrees=(YAW_DEGREES,
-                                                                PITCH_DEGREES),
-                      meta=None):
-    """从三段采样算出 calibration dict；转得不够就抛 ValueError。"""
+def build_calibration(still, yaw_samples, pitch_samples, turns=1,
+                      degrees=(YAW_DEGREES, PITCH_DEGREES), meta=None):
+    """从三段采样算出 calibration dict；转得不够就抛 ValueError。
+
+    `turns` 是水平转的整圈数。yaw 和 pitch 各自算出 counts/degree 后，
+    按角度加权合并成一个尺度（3 圈 1080° 对 90° 的权重是 12:1）。
+    """
     noise = [rms([s.gyro[axis] for s in still]) for axis in range(3)]
 
     def threshold(axis):
@@ -109,24 +130,83 @@ def build_calibration(still, yaw_samples, pitch_samples, degrees=(YAW_DEGREES,
             raise ValueError('检测到的转动太小（积分 %.1f），请重做' % total)
         return total, scale_from(total, degrees_total)
 
-    yaw_total, yaw_scale = pick(yaw_samples, 0, degrees[0])
+    yaw_total, yaw_scale = pick(yaw_samples, 0, turns * degrees[0])
     pitch_total, pitch_scale = pick(pitch_samples, 1, degrees[1])
+
+    yaw_degrees = turns * degrees[0]
+    pooled = (abs(yaw_total) + abs(pitch_total)) / (yaw_degrees + degrees[1])
 
     cal = {
         'version': 1,
+        'source': 'gesture',
         'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'device': meta or {},
+        'turns': turns,
         'update_rate_hz': round(update_rate(yaw_samples), 1),
         'yaw': dict(yaw_scale, axis='gyro_x', noise=noise[0],
+                    counts_per_degree=pooled,
+                    measured=round(yaw_scale['counts_per_degree'], 3),
                     raw_total=round(yaw_total, 2)),
         'pitch': dict(pitch_scale, axis='gyro_y', noise=noise[1],
+                      counts_per_degree=pooled,
+                      measured=round(pitch_scale['counts_per_degree'], 3),
                       raw_total=round(pitch_total, 2)),
         # 同一颗传感器，roll 的灵敏度通常和 yaw 一致；只记录噪声。
         'roll': {'axis': 'gyro_z', 'sign': 1,
-                 'counts_per_degree': yaw_scale['counts_per_degree'],
+                 'counts_per_degree': pooled,
                  'noise': noise[2], 'note': '未单独标定，沿用 yaw 灵敏度'},
     }
     return cal
+
+
+def constant_calibration(yaw_cpd, pitch_cpd=None, sign_yaw=1, sign_pitch=1,
+                         meta=None, source='constant', noise=(0.0, 0.0, 0.0)):
+    """不测动作，直接写 counts/degree（官方值/数据表/估算值都走这里）。"""
+    pitch_cpd = yaw_cpd if pitch_cpd is None else pitch_cpd
+    return {
+        'version': 1,
+        'source': source,
+        'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        'device': meta or {},
+        'update_rate_hz': 89.0,
+        'yaw': {'axis': 'gyro_x', 'counts_per_degree': float(yaw_cpd),
+                'sign': int(sign_yaw), 'noise': noise[0]},
+        'pitch': {'axis': 'gyro_y', 'counts_per_degree': float(pitch_cpd),
+                  'sign': int(sign_pitch), 'noise': noise[1]},
+        'roll': {'axis': 'gyro_z', 'counts_per_degree': float(yaw_cpd),
+                 'sign': 1, 'noise': noise[2],
+                 'note': '未单独标定，沿用 yaw 灵敏度'},
+    }
+
+
+def record_motion(link, pad, max_seconds, threshold, settle=0.7):
+    """从第一次检测到转动开始，直到静止 `settle` 秒（或超时）。"""
+    samples = []
+    started = False
+    last_active = None
+    end = time.monotonic() + max_seconds
+    while time.monotonic() < end:
+        got = pad.reap()
+        if got is None:
+            time.sleep(0.001)
+            continue
+        ctx, _status, data = got
+        if ctx not in link.in_ids:
+            continue
+        link.in_ids.discard(ctx)
+        link.pump(1)
+        if not data or len(data) < 32 or rep.is_reply(data):
+            continue
+        now = time.monotonic()
+        link.last_data = now
+        gyro = rep.decode(data)['gyro']
+        samples.append(Sample(now, gyro))
+        if max(abs(v) for v in gyro) >= threshold:
+            started = True
+            last_active = now
+        elif started and now - last_active >= settle:
+            break
+    return samples
 
 
 def record(link, pad, seconds):
@@ -161,6 +241,12 @@ def write_calibration(path, cal):
     folder = os.path.dirname(os.path.abspath(path))
     if folder:
         os.makedirs(folder, exist_ok=True)
+    # 覆盖前留一份 .bak：标定数据是纯手工得来的，删了就没了。
+    if os.path.exists(path):
+        try:
+            shutil.copyfile(path, path + '.bak')
+        except OSError:
+            pass
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(cal, f, ensure_ascii=False, indent=2)
@@ -170,9 +256,34 @@ def write_calibration(path, cal):
 
 
 def run(cfg, args, calibration_path):
+    output = args.output or calibration_path
+
+    if args.estimate or args.set_yaw is not None:
+        if args.set_yaw is not None:
+            cal = constant_calibration(args.set_yaw, args.set_pitch,
+                                       args.sign_yaw, args.sign_pitch,
+                                       source='constant')
+            note = '手动常数'
+        else:
+            cal = constant_calibration(ESTIMATED_COUNTS_PER_DEGREE,
+                                       ESTIMATED_COUNTS_PER_DEGREE,
+                                       args.sign_yaw, args.sign_pitch,
+                                       source='estimate')
+            note = ('2026-11-19 抓包估算值，约 ±20%；'
+                    '手感不对就重跑 calibrate')
+        path = write_calibration(output, cal)
+        print('✓ 已写入 %s（%s）' % (path, note))
+        print('  yaw   %.3f raw·s/°  sign=%+d'
+              % (cal['yaw']['counts_per_degree'], cal['yaw']['sign']))
+        print('  pitch %.3f raw·s/°  sign=%+d'
+              % (cal['pitch']['counts_per_degree'], cal['pitch']['sign']))
+        return 0
+
     print('体感标定：需要 root（要独占 USB 接口）')
     if os.geteuid() != 0:
         print('当前不是 root，直接读不到 USB；请用 sudo 运行。')
+        print('不想做动作可以先写估算值：')
+        print('  python3 -m flydigi_daemon calibrate --estimate')
         return 1
     devcfg = cfgmod.device_section(cfg)
     dev = usb.find_pad(devcfg['vendor'], devcfg['product'])
@@ -181,6 +292,7 @@ def run(cfg, args, calibration_path):
         return 1
     print('手柄: %s' % dev)
 
+    turns = max(1, int(args.turns))
     pad = usb.Pad(dev)
     link = None
     try:
@@ -198,40 +310,60 @@ def run(cfg, args, calibration_path):
             print('只收到 %d 帧，检查连接后重试' % len(still))
             return 1
         noise = [rms([s.gyro[axis] for s in still]) for axis in range(3)]
-        print('  噪声 RMS: yaw %.2f  pitch %.2f  roll %.2f'
-              % tuple(noise))
+        threshold = max(2.0, max(noise) * 3.0)
+        print('  噪声 RMS: yaw %.2f  pitch %.2f  roll %.2f（阈值 %.1f）'
+              % (noise[0], noise[1], noise[2], threshold))
 
-        print('\n[2/3] 水平匀速转**整整一圈 360°**，转完停住，不要转回来。')
-        _prompt('按 Enter 开始，然后 %.0f 秒内完成…' % args.yaw_seconds)
+        total_degrees = turns * 360
+        print('\n[2/3] 水平匀速转 **%d 整圈（共 %d°）**，转完停住，'
+              '中途不要停顿。' % (turns, total_degrees))
+        _prompt('按 Enter 开始，转完停住就会自动结束（最多 %.0f 秒）…'
+                % args.yaw_seconds)
         link.drain(0.2)
-        yaw = record(link, pad, args.yaw_seconds)
-        print('  收到 %d 帧，角速度更新率约 %.1f Hz'
-              % (len(yaw), update_rate(yaw)))
+        yaw = record_motion(link, pad, args.yaw_seconds, threshold)
+        if len(yaw) < 50 or (yaw[-1].t - yaw[0].t) < 0.8:
+            print('只记录到 %.1f 秒，动作可能没识别到；重试一次。'
+                  % (yaw[-1].t - yaw[0].t if len(yaw) > 1 else 0))
+            return 2
+        print('  记录 %.1f 秒，角速度更新率约 %.1f Hz'
+              % (yaw[-1].t - yaw[0].t, update_rate(yaw)))
 
-        print('\n[3/3] 从水平位置慢慢低头到大约 90°（手柄前端朝下），然后停住。')
-        _prompt('按 Enter 开始，然后 %.0f 秒内完成…' % args.pitch_seconds)
+        print('\n[3/3] 从水平位置慢慢低头到大约 90°（手柄前端朝下），'
+              '然后停住。')
+        _prompt('按 Enter 开始，停住后自动结束（最多 %.0f 秒）…'
+                % args.pitch_seconds)
         link.drain(0.2)
-        pitch = record(link, pad, args.pitch_seconds)
+        pitch = record_motion(link, pad, args.pitch_seconds, threshold)
+        if len(pitch) < 30:
+            print('俯仰动作没记录到，重试一次。')
+            return 2
 
         meta = {}
         if info:
             meta = {'vid': '045e', 'pid': '028e',
                     'uid': info['uid'], 'fw': info['fw']}
         try:
-            cal = build_calibration(still, yaw, pitch, meta=meta)
+            cal = build_calibration(still, yaw, pitch, turns=turns, meta=meta)
         except ValueError as exc:
             print('\n✗ 标定失败：%s' % exc)
             print('  重新运行 calibrate，动作慢一点、幅度做足。')
             return 2
 
-        path = write_calibration(args.output or calibration_path, cal)
+        path = write_calibration(output, cal)
+        yaw_m = cal['yaw']['measured']
+        pitch_m = cal['pitch']['measured']
+        ratio = max(yaw_m, pitch_m) / max(1e-9, min(yaw_m, pitch_m))
         print('\n✓ 已写入 %s' % path)
-        for name in ('yaw', 'pitch', 'roll'):
-            section = cal[name]
-            print('  %-5s %8.3f raw·s/°  sign=%+d  noise=%.2f'
-                  % (name, section['counts_per_degree'],
-                     section['sign'], section['noise']))
-        print('\n桌面配置里 Home 切换体感组；改灵敏度用 config/user.toml：')
+        print('  yaw    measured %.3f  sign=%+d  noise=%.2f'
+              % (yaw_m, cal['yaw']['sign'], cal['yaw']['noise']))
+        print('  pitch  measured %.3f  sign=%+d  noise=%.2f'
+              % (pitch_m, cal['pitch']['sign'], cal['pitch']['noise']))
+        print('  合并后 counts_per_degree = %.3f（按 %d° 与 90° 加权）'
+              % (cal['yaw']['counts_per_degree'], total_degrees))
+        if ratio > 1.35:
+            print('⚠ yaw/pitch 单独测量相差 %.0f%%，已按角度加权；'
+                  '若手感不对，重做 90° 那一步。' % ((ratio - 1) * 100))
+        print('\n桌面配置里 Home 切换体感组；灵敏度用 config/user.toml 调：')
         print('  [profile.desktop.axis.gyro_x]\n  sensitivity = 1.0')
         return 0
     finally:

@@ -24,7 +24,9 @@ python3 tests/test_m4.py                 # 体感积分 / 标定数学
 
 ```bash
 sudo python3 -m flydigi_daemon calibrate
-# 静置 3s -> 水平转 360° -> 低头 90°，写 config/calibration.json
+# 静置 3s -> 水平转 3 圈（自动停）-> 低头 90°，写 config/calibration.json
+python3 -m flydigi_daemon calibrate --estimate      # 不测动作，写估算值
+python3 -m flydigi_daemon calibrate --set-yaw 13.4 --sign-pitch -1
 ```
 
 之后 `desktop` 配置按 Home 开关体感；`show` 顶部会显示标定是否已加载。

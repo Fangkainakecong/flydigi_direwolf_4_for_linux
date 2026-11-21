@@ -95,9 +95,24 @@ sudo python3 -m flydigi_daemon run
 sudo python3 -m flydigi_daemon calibrate
 ```
 
-按提示做三步：静置 3 秒 → 水平转整整 360° → 低头约 90°。产物是
-`config/calibration.json`（不进 git）。之后在 `desktop` 配置里按 **Home**
-开/关体感；灵敏度/平滑/死区在 `config/user.toml` 里改：
+按提示做三步：静置 3 秒 → 水平转 **3 整圈** → 低头约 90°。转完停住会
+自动结束；起停误差摊到 1080° 上，yaw/pitch 还会互相校验。产物是
+`config/calibration.json`（不进 git）。
+
+官方 Space Station 的配置里只有体感目标/开关/死区/灵敏度（出厂 25/25、
+死区 8），**没有**物理标定；上游 openflydigi 也写明 Flydigi 的
+LSB-per-deg/s 没有参考值。所以 counts/degree 只能测，或手动给常数：
+
+```bash
+# 不想做动作：用 2026-11-19 抓包估算值（约 ±20%，仅起步）
+python3 -m flydigi_daemon calibrate --estimate
+
+# 以后拿到官方/数据表值，直接写
+python3 -m flydigi_daemon calibrate --set-yaw 13.4 --sign-pitch -1
+```
+
+之后在 `desktop` 配置里按 **Home** 开/关体感；灵敏度/平滑/死区在
+`config/user.toml` 里改：
 
 ```toml
 [profile.desktop.axis.gyro_x]

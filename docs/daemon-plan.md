@@ -831,8 +831,13 @@ jstest /dev/input/jsN
 - 轴向沿用实测：yaw→`gyro_x`、pitch→`gyro_y`、roll→`gyro_z`（弱）
 - 积分用零阶保持：`px += v × dt ÷ counts_per_degree × sensitivity`
   （报文 1 kHz、角速度约 89 Hz，重复值保持到下一拍）
-- `calibrate`：静置 3 s（噪声 RMS）→ 水平 360° → 低头 90°；自动挑主导轴、
-  判断符号，动作不对会要求重做；写 `config/calibration.json`（不进 git）
+- `calibrate`：静置 3 s（噪声 RMS）→ 水平 **3 整圈**（默认，可 `--turns`）→
+  低头 90°；自动检测起停、挑主导轴、判符号；yaw/pitch 分别测量后按角度加权，
+  差异过大时提示重做；写 `config/calibration.json`（不进 git）。
+  `--estimate` 用 11-19 抓包的估算值，`--set-yaw/--set-pitch` 可直接写常数
+- **官方文件里没有物理标定**：体感块只有 target/enable/deadzone/sensitivity
+  （出厂 25/25、死区 8）；上游也写明 LSB-per-deg/s 无参考值。详见
+  `docs/findings-motion.md` 的"官方参数"一节
 - 桌面配置里 Home 按下沿切换 `gyro` 组；组关闭时条目归零并释放
 - 体感与左摇杆映射到同一个 `mouse:x/y`，输出自然**相加**
 - 平滑（EMA）、死区、灵敏度、反向都在 `[profile.*.axis.gyro_*]`

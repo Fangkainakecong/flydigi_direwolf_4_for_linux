@@ -46,10 +46,20 @@ def build_parser():
     cal.add_argument('--config', default=None)
     cal.add_argument('--still', type=float, default=3.0,
                      help='静置采样秒数（默认 3）')
-    cal.add_argument('--yaw-seconds', type=float, default=6.0,
-                     help='水平旋转采样窗口（默认 6 秒）')
-    cal.add_argument('--pitch-seconds', type=float, default=4.0,
-                     help='俯仰采样窗口（默认 4 秒）')
+    cal.add_argument('--turns', type=int, default=3,
+                     help='水平转几整圈（默认 3，越大越准）')
+    cal.add_argument('--yaw-seconds', type=float, default=14.0,
+                     help='水平旋转最长采样时间（默认 14 秒，停住会自动结束）')
+    cal.add_argument('--pitch-seconds', type=float, default=6.0,
+                     help='俯仰最长采样时间（默认 6 秒）')
+    cal.add_argument('--estimate', action='store_true',
+                     help='不测动作，写入抓包估算值（±20%%，仅起步）')
+    cal.add_argument('--set-yaw', type=float, default=None,
+                     help='直接指定 yaw 的 counts_per_degree')
+    cal.add_argument('--set-pitch', type=float, default=None,
+                     help='直接指定 pitch 的 counts_per_degree（默认同 yaw）')
+    cal.add_argument('--sign-yaw', type=int, choices=(1, -1), default=1)
+    cal.add_argument('--sign-pitch', type=int, choices=(1, -1), default=1)
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 

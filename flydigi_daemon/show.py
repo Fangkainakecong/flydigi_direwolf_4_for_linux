@@ -278,6 +278,8 @@ def run(cfg, args):
     cal = mapping.load_calibration(cfgmod.calibration_file(cfg))
     if cal:
         cal_label = '已加载（更新率 %s Hz）' % cal.get('update_rate_hz', '?')
+        if cal.get('source') == 'estimate':
+            cal_label += '，估算值，建议重新标定'
     else:
         cal_label = '未标定（运行 calibrate 生成）'
     if not args.quiet:
