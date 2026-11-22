@@ -1,12 +1,13 @@
 [Unit]
 Description=Start Flydigi daemon on controller activity
-After=multi-user.target
+After=local-fs.target
 
 [Service]
 Type=simple
 WorkingDirectory=@ROOT@
 ExecStart=/usr/bin/python3 -m flydigi_daemon watch
 Environment=PYTHONUNBUFFERED=1
+SyslogIdentifier=flydigi-watch
 Restart=always
 RestartSec=3
 

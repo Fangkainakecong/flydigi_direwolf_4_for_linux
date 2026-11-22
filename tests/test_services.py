@@ -105,7 +105,8 @@ def test_identify_reply_parser():
 
 def test_idle_config_default_present():
     cfg = config.load()
-    assert int(cfg['daemon']['idle_exit_s']) == 3600
+    assert int(cfg['daemon']['idle_exit_s']) == 0
+    assert int(cfg['daemon']['battery_refresh_s']) == 900
     assert cfg['device']['product_hint'] == 'Direwolf 4'
 
 

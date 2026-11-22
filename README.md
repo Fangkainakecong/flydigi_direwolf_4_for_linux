@@ -34,7 +34,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
 | `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
 | 本地可视化编辑器、电量显示、保存后退出 | ✅ |
-| systemd 自动启停、1 小时空闲退出 | ✅ 已安装 active |
+| systemd：daemon 开机自启 + udev 插拔；watch 可选 | ✅ |
 | 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
 
 ### 命令速查
@@ -130,10 +130,12 @@ flydigi_direwolf_4_for_linux/
 │   ├── flydigi_ff_probe.py           # FF 上传/播放/强度扫描
 │   ├── procon_keepalive.py           # Switch Pro 模式保活实验
 │   ├── flydigi_edit.sh               # 编辑器启动脚本（快捷方式 Exec）
-│   └── install_services.sh           # 安装/卸载 flydigi-watch + daemon 服务
+│   └── install_services.sh           # 安装/切换 daemon-only 或 watch 模式
 ├── systemd/
 │   ├── flydigi-dw4.service.in        # daemon unit 模板（@ROOT@ 替换）
-│   └── flydigi-watch.service.in      # watch unit 模板
+│   └── flydigi-watch.service.in      # watch unit 模板（可选）
+├── udev/
+│   └── 99-flydigi-dw4.rules          # dongle 插入时拉起 daemon（只匹配 Direwolf 4）
 ├── config/
 │   ├── default.toml                  # 带注释的默认配置（四 profile）
 │   ├── user.example.toml             # 个人覆盖层模板
@@ -195,7 +197,7 @@ flydigi_direwolf_4_for_linux/
 - **配置**：TOML（`tomli`），`default.toml` + `user.toml` 深合并
 - **编辑器**：Python 标准库 `http.server` + 原生 HTML/CSS/JS；只监听
   `127.0.0.1`
-- **服务**：systemd + journald；`flydigi-watch` 按需启停 `flydigi-dw4`
+- **服务**：systemd + journald；默认 `flydigi-dw4` 开机自启 + udev，watch 可选
 - **辅助**：X11 `libXtst`（可选的 XTEST 卡键清理）、`evdev` 的 Gamepad API
   录制
 - **逆向参考**：`reference/openflydigi/`（上游只读，不参与运行）
@@ -225,7 +227,7 @@ FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
 - **2026-11-21**：M3 映射 DSL、`user.toml`、`show`、可视化编辑器；
   M4 体感积分/三步标定/int8 回绕修复；自动启停设计。
 - **2026-11-22**：M5 震动（FF_RUMBLE/切槽反馈）、电量在线刷新、
-  systemd watch 安装并 active、日志/参数范围、编辑器保存/关闭退出；
+  systemd daemon-only + udev、日志/参数范围、编辑器保存/关闭退出；
   与黑武士2（`Flydigi 2.4G Android`）同插时按产品名隔离。
 
 ### 范围与限制
@@ -278,8 +280,8 @@ FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
 - 🟡 **M5 震动透传代码完成，待硬件验收**：虚拟手柄声明 `FF_RUMBLE`，
   daemon 处理游戏 FF 上传/播放，翻译成 12 字节 rumble 包；
   `SELECT+A/B/X/Y` 成功切换时会短震一次（`[feedback] profile_switch`）
-- 🟡 **M6 自动启停已安装并 active**：`flydigi-watch` 按设备/操作启停
-  `flydigi-dw4`，1 小时空闲退出，拔插自动恢复
+- ✅ **M6 服务化**：默认 **daemon-only**（`flydigi-dw4` 开机自启 + udev
+  检测 dongle），不再常驻 watch；watch 代码保留，可用 `--watch` 切回
 - ⏳ 宏按需再加（**连发由板载负责**，daemon 不做软件连发）
 
 ### 快速开始
@@ -441,7 +443,10 @@ python3 -m flydigi_daemon edit
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
 - ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
 
-## 自动启停（systemd，可选）
+## 自动启停（systemd）
+
+默认是 **daemon-only**：`flydigi-dw4` 开机自启，udev 规则在 dongle 插入时
+拉起它；`flydigi-watch` 代码保留但**不启动**，省掉一个常驻进程。
 
 先确认会选对设备（两个手柄都插着也能看出来）：
 
@@ -457,22 +462,27 @@ python3 -m flydigi_daemon devices
 * 2-1    Flydigi Direwolf 4     ← 只接管这个
 ```
 
-安装后由 `flydigi-watch.service` 按需启动 `flydigi-dw4.service`：
+安装/切换：
 
 ```bash
-sudo scripts/install_services.sh
-journalctl -u flydigi-watch -u flydigi-dw4 -f
+sudo scripts/install_services.sh          # 默认：daemon 开机自启 + udev
+sudo scripts/install_services.sh --watch  # 可选：watch 按需启停
+sudo scripts/install_services.sh --remove # 卸载
+journalctl -u flydigi-dw4 -f
 ```
 
-行为：
+默认 daemon-only 行为：
 
-- 插入 dongle → 自动启动 daemon
-- 拔掉 dongle → 自动停止并恢复 xpad
-- 连续 **1 小时没有真实操作** → daemon 自己退出；watch 保留，下一次
-  按键/摇杆/扳机/体感转动时自动再启动
-- 冰原狼4 无线约 15 分钟休眠时：daemon 继续等（最多到 1 小时），输入超时
-  会先释放所有按键；1 小时后退出，醒来再按一下就会重新启动
-- `config/user.toml` 可改 `[daemon] idle_exit_s`（秒，0 = 不自动退出）
+- 开机 → `flydigi-dw4` 自启（`idle_exit_s = 0`，常驻）
+- 插入 dongle → udev 规则拉起 daemon
+- 拔掉 dongle → daemon 退出并恢复 xpad
+- 冰原狼4 无线约 15 分钟休眠时：daemon 继续运行，400 ms 没输入会先释放
+  所有按键，醒来立即恢复
+- 不再需要 `flydigi-watch`，节省约 12 MB 常驻内存
+- 若切回 `--watch` 模式，可把 `[daemon] idle_exit_s` 设回 3600，由 watch
+  在下次操作时重新启动
+
+udev 只匹配 `Flydigi Direwolf 4`，不会因为黑武士2 插拔而启动 daemon。
 
 ### 和黑武士2 一起用
 
