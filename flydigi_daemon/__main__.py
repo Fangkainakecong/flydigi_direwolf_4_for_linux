@@ -7,8 +7,11 @@
 """
 
 import argparse
+import errno
 import os
 import sys
+
+from .procname import set_name
 
 from . import config as cfgmod
 from . import mapping
@@ -65,6 +68,8 @@ def build_parser():
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 
+    tray = sub.add_parser('tray', help='状态栏托盘（暂停/重启/编辑配置/退出）')
+
     logs = sub.add_parser('logs', help='查看 daemon/watch/编辑器日志')
     logs.add_argument('-n', '--lines', type=int, default=80)
     logs.add_argument('-f', '--follow', action='store_true',
@@ -108,6 +113,18 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    set_name({
+        'run': 'flydigi-dw4',
+        'watch': 'flydigi-watch',
+        'edit': 'flydigi-edit',
+        'tray': 'flydigi-tray',
+        'calibrate': 'flydigi-calib',
+        'check': 'flydigi-check',
+        'show': 'flydigi-show',
+        'devices': 'flydigi-devices',
+        'logs': 'flydigi-logs',
+        'release': 'flydigi-release',
+    }.get(args.cmd, 'flydigi'))
     cfg = cfgmod.load(getattr(args, 'config', None))
 
     errors, warnings = mapping.lint_config(cfg)
@@ -124,6 +141,9 @@ def main(argv=None):
         if args.cmd == 'calibrate':
             from .calibrate import run as calibrate_run
             return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
+        if args.cmd == 'tray':
+            from .tray import main as tray_main
+            return tray_main()
         if args.cmd == 'logs':
             from .logs import run as logs_run
             return logs_run(args)
@@ -179,6 +199,10 @@ def main(argv=None):
         print('用 sudo 运行，或先配置 udev 规则（M6）。')
         return 1
     except OSError as exc:
+        if exc.errno in (errno.ENODEV, errno.ENXIO, errno.ESHUTDOWN):
+            # dongle 被拔掉/设备消失：正常退出，交给 udev 下次插入时拉起。
+            print('设备已断开，daemon 退出（拔插后会自动恢复）')
+            return 0
         print('USB 错误：%s' % exc)
         print('确认 dongle 没被拔掉，且没有另一个程序占用接口。')
         return 1

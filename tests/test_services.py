@@ -2,6 +2,7 @@
 """设备选择 / 空闲判定 / 自动启停相关回归"""
 
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -108,6 +109,26 @@ def test_idle_config_default_present():
     assert int(cfg['daemon']['idle_exit_s']) == 0
     assert int(cfg['daemon']['battery_refresh_s']) == 900
     assert cfg['device']['product_hint'] == 'Direwolf 4'
+
+
+def test_procname_sets_comm():
+    code = ('from flydigi_daemon.procname import set_name\n'
+            'set_name("flydigi-test")\n'
+            'print(open("/proc/self/comm").read().strip())\n')
+    out = subprocess.check_output([sys.executable, '-c', code],
+                                  cwd=ROOT, text=True)
+    assert out.strip() == 'flydigi-test', out
+
+
+def test_run_live_without_pad_exits_cleanly():
+    from flydigi_daemon import daemon
+    old_find, old_msg = daemon.usb.find_pad, daemon.usb.no_pad_message
+    daemon.usb.find_pad = lambda *a, **k: None
+    daemon.usb.no_pad_message = lambda *a, **k: 'no pad'
+    try:
+        assert daemon.run_live(config.load()) == 0
+    finally:
+        daemon.usb.find_pad, daemon.usb.no_pad_message = old_find, old_msg
 
 
 def main():

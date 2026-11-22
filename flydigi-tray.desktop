@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Flydigi 托盘
+Name[zh_CN]=Flydigi 托盘
+Comment=飞智冰原狼4：暂停/恢复、重启、编辑配置
+Exec=/home/adrian/projects/flydigi_direwolf_4_for_linux/scripts/flydigi_tray.sh
+Path=/home/adrian/projects/flydigi_direwolf_4_for_linux
+Icon=/home/adrian/projects/flydigi_direwolf_4_for_linux/assets/flydigi.svg
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

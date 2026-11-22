@@ -34,6 +34,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
 | `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
 | 本地可视化编辑器、电量显示、保存后退出 | ✅ |
+| 状态栏托盘：暂停/恢复、重启、编辑、退出 | ✅ 当前已运行 |
 | systemd：daemon 开机自启 + udev 插拔；watch 可选 | ✅ |
 | 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
 
@@ -50,6 +51,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | `python3 -m flydigi_daemon devices` | 列出 `045e:028e`，标出会接管哪一个 |
 | `python3 -m flydigi_daemon watch` | 按设备/活动启停（systemd 服务内部用） |
 | `python3 -m flydigi_daemon logs [-f]` | 查看 daemon/watch/编辑器日志 |
+| `python3 -m flydigi_daemon tray` | 状态栏托盘（当前也由 autostart 启动） |
 | `python3 -m flydigi_daemon release` | 清理 XTEST 卡住的键/鼠标（通用） |
 
 `run` 常用参数：`--profile desktop`、`--calibration path`、`--seconds N`。
@@ -86,6 +88,9 @@ python3 -m flydigi_daemon devices
 flydigi_direwolf_4_for_linux/
 ├── README.md                         # 本文件：介绍、命令、目录、技术栈、历史
 ├── flydigi-mapping.desktop           # 项目内快捷方式；桌面另有一份
+├── flydigi-tray.desktop              # 托盘 launcher；~/.config/autostart 也有一份
+├── assets/
+│   └── flydigi.svg                   # 托盘/快捷方式图标
 ├── flydigi_daemon/                   # 正式 daemon（M1 起）
 │   ├── __init__.py                   # 包版本
 │   ├── __main__.py                   # CLI 子命令入口
@@ -105,6 +110,8 @@ flydigi_direwolf_4_for_linux/
 │   ├── show.py                       # 终端映射表、自包含 HTML 可视化
 │   ├── ui.py                         # 本地网页编辑器服务端
 │   ├── ui.html                       # 编辑器前端（HTML/CSS/JS）
+│   ├── tray.py                       # GTK/AppIndicator 状态栏托盘
+│   ├── procname.py                   # prctl 设置进程 comm（flydigi-dw4 等）
 │   ├── logs.py                       # journal + 编辑器日志入口
 │   └── xrelease.py                   # 通用 XTEST 幽灵按键清理
 ├── scripts/
@@ -130,6 +137,8 @@ flydigi_direwolf_4_for_linux/
 │   ├── flydigi_ff_probe.py           # FF 上传/播放/强度扫描
 │   ├── procon_keepalive.py           # Switch Pro 模式保活实验
 │   ├── flydigi_edit.sh               # 编辑器启动脚本（快捷方式 Exec）
+│   ├── flydigi_tray.sh               # 托盘启动脚本（日志写 /tmp）
+│   ├── install_tray.sh               # 安装/移除托盘自启动（用户级）
 │   └── install_services.sh           # 安装/切换 daemon-only 或 watch 模式
 ├── systemd/
 │   ├── flydigi-dw4.service.in        # daemon unit 模板（@ROOT@ 替换）
@@ -198,6 +207,7 @@ flydigi_direwolf_4_for_linux/
 - **编辑器**：Python 标准库 `http.server` + 原生 HTML/CSS/JS；只监听
   `127.0.0.1`
 - **服务**：systemd + journald；默认 `flydigi-dw4` 开机自启 + udev，watch 可选
+- **托盘**：PyGObject + AyatanaAppIndicator3 + XFCE status notifier（已安装）
 - **辅助**：X11 `libXtst`（可选的 XTEST 卡键清理）、`evdev` 的 Gamepad API
   录制
 - **逆向参考**：`reference/openflydigi/`（上游只读，不参与运行）
@@ -496,6 +506,31 @@ udev 只匹配 `Flydigi Direwolf 4`，不会因为黑武士2 插拔而启动 dae
 - 如果产品名不同，`devices` 会打印实际名字；把 `[device] product_hint`
   改成能唯一定位 dongle 的字符串即可。
 
+## 状态栏托盘
+
+`python3 -m flydigi_daemon tray` 会启动一个 AppIndicator。当前也已写入
+`~/.config/autostart/flydigi-tray.desktop`，登录后自动出现；重装/移除可用
+`scripts/install_tray.sh install|remove`（用户级，不需要 root）。
+
+菜单：
+
+- 状态、当前配置/槽位、电量
+- 暂停映射 / 恢复映射（stop/start `flydigi-dw4`）
+- 重启 daemon
+- 编辑配置（启动 `flydigi_edit.sh`）
+- 退出托盘（映射继续运行）
+- 停止映射并退出托盘
+
+控制 systemd 需要 polkit 权限；`sudo scripts/install_services.sh` 会安装
+只允许当前用户管理 `flydigi-*` 两个服务的规则。当前 Python/GTK 托盘实测
+常驻内存约 **49 MB**；如果优先省内存，可以不启动它，或改用面板 launcher/
+更轻的原生托盘。
+
+进程名方面，启动时会用 `prctl(PR_SET_NAME)` 把 `comm` 改成
+`flydigi-dw4` / `flydigi-tray`，`ps -o comm` 和任务管理器里不再是
+`python3`；完整命令行仍是 `python3 -m flydigi_daemon ...`。不需要编译打包；
+想要单个可执行文件时再用 PyInstaller/Nuitka。
+
 ## 日志
 
 ```bash
@@ -505,9 +540,9 @@ journalctl -u flydigi-watch -u flydigi-dw4 -f
 ```
 
 - daemon / watch → systemd journal（自动写入；当前总 journal 约 64 MB）
-- 编辑器 → `/tmp/flydigi-edit.log`（保存后自动退出）；超过 256 KiB 轮转为
-  `.log.1`，最多约 512 KiB；`/tmp` 还会被系统按默认策略清理
-- 编辑器日志只在通过快捷方式启动时产生
+- 编辑器 → `/tmp/flydigi-edit.log`（自动写入；保存后自动退出）
+- 托盘 → `/tmp/flydigi-tray.log`（自动写入）
+- 编辑器日志只在通过快捷方式启动时产生；`/tmp` 由系统按默认策略清理
 - journald 默认没有按时间删除的上限，只有磁盘比例上限。要收紧全局日志：
   `sudo journalctl --vacuum-size=200M`、`sudo journalctl --vacuum-time=14d`，
   或在 `/etc/systemd/journald.conf` 设 `SystemMaxUse=200M` /

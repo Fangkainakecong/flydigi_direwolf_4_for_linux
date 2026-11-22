@@ -22,14 +22,6 @@ open_url() {
   fi
 }
 
-# /tmp 里的编辑器日志：超过 256 KiB 就轮转一份，最多保留 ~512 KiB。
-if [ -f "$LOG" ]; then
-  size=$(wc -c < "$LOG" 2>/dev/null || echo 0)
-  if [ "${size:-0}" -gt "${FLYDIGI_EDIT_LOG_MAX:-262144}" ]; then
-    mv -f "$LOG" "$LOG.1"
-  fi
-fi
-
 model=$(curl -fsS --max-time 1 "${URL}api/model" 2>/dev/null || true)
 case "$model" in
   *'"editor": 5'*|*'"editor":5'*)

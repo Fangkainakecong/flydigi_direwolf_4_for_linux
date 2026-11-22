@@ -89,7 +89,9 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         print(usb.no_pad_message(devcfg['vendor'], devcfg['product'],
                                  devcfg.get('product_hint')))
         print('确认 dongle 插好、手柄已开机；插着别的手柄时也不会误接管。')
-        return 1
+        # 没有目标设备属于正常情况（例如开机时 dongle 还没插）。返回 0 让
+        # systemd 标成 inactive 而不是 failed；插上后 udev 规则会再拉起。
+        return 0
 
     print('飞智 daemon（M3 映射）' + ('（dry-run，不建虚拟设备）' if dry_run else ''))
     print('手柄: %s' % dev)
