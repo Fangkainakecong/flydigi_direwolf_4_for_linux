@@ -19,7 +19,11 @@ from evdev import ecodes
 from .usb import EP_OUT, URB_INT
 
 INPUT_EVENT = struct.Struct('<qqHHi')
-DEFAULT_TEMPLATE = bytes.fromhex('00 01 0f c0 00 ff 00 ff 00 00 00 00')
+# Xbox 360 标准 rumble 输出包，和 xpad 的 XTYPE_XBOX360 一样：
+#   [0]=0x00 [1]=0x08 [2]=0x00 [3]=左马达 [4]=右马达 [5..7]=0
+# Direwolf 4 在 PC 模式就是 045e:028e XTYPE_XBOX360，dongle 认这个包。
+# 旧模板 00 01 0f c0 ... 只会让 OUT URB 完成，实际不驱动马达。
+DEFAULT_TEMPLATE = bytes.fromhex('00 08 00 00 00 00 00 00')
 
 
 def _field(obj, *names):
@@ -44,7 +48,7 @@ def to_byte(value):
 
 
 def rumble_packet(strong, weak, template=DEFAULT_TEMPLATE,
-                  strong_byte=3, weak_byte=5, enable_byte=7):
+                  strong_byte=3, weak_byte=4, enable_byte=-1):
     packet = bytearray(template)
     packet[strong_byte] = strong & 0xFF
     packet[weak_byte] = weak & 0xFF
@@ -128,14 +132,14 @@ class Rumble(object):
         try:
             template = bytes.fromhex(
                 str(cfg.get('template', '')).replace(' ', ''))
-            if len(template) != 12:
+            if len(template) < 8:
                 template = DEFAULT_TEMPLATE
         except ValueError:
             template = DEFAULT_TEMPLATE
         self.template = template
         self.strong_byte = int(cfg.get('strong_byte', 3))
-        self.weak_byte = int(cfg.get('weak_byte', 5))
-        self.enable_byte = int(cfg.get('enable_byte', 7))
+        self.weak_byte = int(cfg.get('weak_byte', 4))
+        self.enable_byte = int(cfg.get('enable_byte', -1))
         self.interval = 1.0 / max(5.0, float(cfg.get('rate_hz', 50)))
         self.active = None          # (strong, weak, end_time)
         self.last_sent = 0.0
@@ -147,11 +151,14 @@ class Rumble(object):
                               self.enable_byte)
         try:
             self.pad.submit(URB_INT, EP_OUT, packet, len(packet))
-        except OSError:
+        except OSError as exc:
             self.errors += 1
+            if self.errors <= 5:
+                print('震动包发送失败: %r' % (exc,))
 
-    def pulse(self, strong=200, weak=120, ms=120):
+    def pulse(self, strong=255, weak=200, ms=250):
         """切配置/开体感时的短震动；会覆盖当前游戏震动。"""
+        print('震动: %d/%d %dms' % (strong, weak, ms))
         self.active = (strong, weak, time.time() + ms / 1000.0)
         self.last_sent = 0.0
         self._send(strong, weak)
@@ -169,11 +176,14 @@ class Rumble(object):
                 break
             if kind != 'play':
                 continue
+            if data['value'] == 0:
+                # 停止事件可能发生在 erase 之后，所以先处理 value=0。
+                print('FF 停止: id=%s' % data['id'])
+                self.stop()
+                continue
             effect = self.hub.effects.get(data['id'])
             if not effect:
-                continue
-            if data['value'] == 0:
-                self.stop()
+                print('FF 播放: 找不到 effect %s' % data['id'])
                 continue
             if effect.get('type') != ecodes.FF_RUMBLE:
                 continue
@@ -183,8 +193,11 @@ class Rumble(object):
                 end = now + 3600
             else:
                 end = now + length * max(1, repeat)
-            self.active = (to_byte(effect.get('strong', 0)),
-                           to_byte(effect.get('weak', 0)), end)
+            strong = to_byte(effect.get('strong', 0))
+            weak = to_byte(effect.get('weak', 0))
+            print('FF 播放: id=%s 次数=%s 时长=%dms 强度=%d/%d'
+                  % (data['id'], repeat, length * 1000, strong, weak))
+            self.active = (strong, weak, end)
             self.last_sent = 0.0
 
         if not self.active:

@@ -32,7 +32,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | 按钮/轴 → 手柄、键盘、鼠标、滚轮、组开关 | ✅ |
 | 键盘组合键、鼠标方向/滚轮、轴死区/曲线 | ✅ |
 | 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
-| `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
+| `FF_RUMBLE` 震动透传、切配置短震 | 🟡 标准 8 字节包已接入，待体感确认 |
 | 本地可视化编辑器、电量显示、保存后继续编辑 | ✅ |
 | 状态栏托盘：暂停/恢复、配置选择、编辑、重启、退出 | ✅ 当前已运行 |
 | systemd：daemon 开机自启 + udev；watch 保留但默认不启用 | ✅ |
@@ -105,7 +105,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── slots.py                      # SELECT+ABXY 四槽仲裁、state.json
 │   ├── mapping.py                    # 映射 DSL、轴规则、lint、目标格式化
 │   ├── devices.py                    # uinput Xbox/键盘/鼠标、capability、差量写入
-│   ├── rumble.py                     # FF_RUMBLE 上传/播放 → 12 字节 rumble 包
+│   ├── rumble.py                     # FF_RUMBLE 上传/播放 → Xbox360 8 字节包
 │   ├── calibrate.py                  # 体感标定（静置/3 圈/90°、常数/估算）
 │   ├── status.py                     # 电量/固件/当前配置 status.json
 │   ├── watch.py                      # dongle/活动监测，启停 systemd daemon
@@ -208,7 +208,8 @@ flydigi_direwolf_4_for_linux/
 - **USB**：Linux usbfs + `ctypes` ioctl，异步 interrupt URB（没有 libusb 依赖）
 - **输入**：Linux evdev / uinput；虚拟 Xbox 360 手柄 GUID
   `030000005e0400008e02000014010000`
-- **震动**：uinput `EV_FF` / `FF_RUMBLE`，翻译成 EP 0x05 的 12 字节厂商包
+- **震动**：uinput `EV_FF` / `FF_RUMBLE`，翻译成 EP 0x05 的 Xbox 360
+  标准 8 字节包（与内核 xpad 同款）
 - **配置**：TOML（`tomli`），`default.toml` + `user.toml` 深合并
 - **编辑器**：Python 标准库 `http.server` + 原生 HTML/CSS/JS；只监听
   `127.0.0.1`
@@ -230,7 +231,7 @@ dongle 045e:028e
   → uinput 虚拟 Xbox 手柄 + 键盘 + 鼠标
   → 游戏 / 桌面
 
-FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
+FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 8 字节标准包
 ```
 
 ### 开发历程
@@ -294,8 +295,8 @@ FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
   `tests/test_m3.py` + `tests/test_show.py` 共 24 项离线全过
 - 🟡 **M4 代码完成，待标定/硬件验收**：体感积分 → 鼠标、`calibrate` 三步标定、
   Home 切换 gyro 组；`tests/test_m4.py` 15 项离线全过
-- 🟡 **M5 震动透传代码完成，待硬件验收**：虚拟手柄声明 `FF_RUMBLE`，
-  daemon 处理游戏 FF 上传/播放，翻译成 12 字节 rumble 包；
+- 🟡 **M5 震动透传代码完成，待体感确认**：虚拟手柄声明 `FF_RUMBLE`，
+  daemon 处理游戏 FF 上传/播放，翻译成 Xbox 360 标准 8 字节包；
   `SELECT+A/B/X/Y` 成功切换时会短震一次（`[feedback] profile_switch`）
 - ✅ **M6 服务化**：默认 **daemon-only**（`flydigi-dw4` 开机自启 + udev
   检测 dongle）；watch 代码/unit 保留，但默认 **disable、不自动启动**；
@@ -465,7 +466,7 @@ python3 -m flydigi_daemon edit
 保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
 `.bak`），不会覆盖默认配置。改完重启 daemon 生效。
 - ⏳ `[16]` 轴编码、体感量纲标定（公开资料只覆盖 int16 报文族，本机 int8 需自标定）
-- ⏳ FF 三字节语义（`[3]/[5]/[7]`）仍需 `--sweep` 实测
+- 🟡 震动已改为 xpad 同款 8 字节包（`[3]` 左、`[4]` 右），待实际体感确认
 
 ## 自动启停（systemd）
 

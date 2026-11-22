@@ -64,11 +64,12 @@ version = 0x0114
 
 [rumble]
 enabled = true
-# 实测可用包；strong_byte/weak_byte 由 flydigi_ff_probe.py --sweep 确认后改这里。
-template = "00 01 0f c0 00 ff 00 ff 00 00 00 00"
+# Xbox 360 标准 8 字节 rumble 包（与内核 xpad 的 XTYPE_XBOX360 相同）：
+#   [3]=左马达强度 0..255，[4]=右马达强度 0..255
+template = "00 08 00 00 00 00 00 00"
 strong_byte = 3
-weak_byte = 5
-enable_byte = 7
+weak_byte = 4
+enable_byte = -1
 rate_hz = 50
 
 [calibration]

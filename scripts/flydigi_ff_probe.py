@@ -4,14 +4,13 @@
 背景
 ----
 独占 dongle 以后，游戏看到的是 daemon 造的虚拟手柄，震动不再经过 xpad。
-daemon 必须接收虚拟手柄的 FF 上传/播放事件，再把强弱力度翻译成厂商
-rumble 报文（EP 0x05，12 字节），否则游戏里所有震动都会消失。
+daemon 必须接收虚拟手柄的 FF 上传/播放事件，再把强弱力度翻译成
+Xbox 360 标准 rumble 报文（EP 0x05，8 字节）：
 
-已实测可用报文（flydigi_2.4g_usbfs_probe.py 阶段 C）::
+    00 08 00 [左马达] [右马达] 00 00 00
 
-    00 01 0F C0 00 FF 00 FF 00 00 00 00
-
-`[3]` / `[5]` / `[7]` 各对应哪个马达、是否线性还没定。本脚本做两件事：
+Direwolf 4 在 PC 模式就是 045e:028e XTYPE_XBOX360，和内核 xpad 一致。
+旧的 `00 01 0F C0 ...` 模板只会让 OUT URB 完成，不驱动马达。本脚本做两件事：
 
 1. 建虚拟 Xbox 手柄，按 fftest / 游戏的强度发厂商报文，测延迟；
 2. `--sweep` 逐档扫描字节，让你回答"哪边在震"，把结论写进 JSON。
@@ -70,12 +69,12 @@ SEND_HZ = 50
 INPUT_EVENT = struct.Struct('<qqHHi')     # 64 位 struct input_event
 
 
-def rumble_packet(strong, weak, enable_byte=7, strong_byte=3, weak_byte=5,
+def rumble_packet(strong, weak, enable_byte=-1, strong_byte=3, weak_byte=4,
                   template=None):
-    """按探针测得的模板拼 12 字节 rumble 包。strong/weak 是 0..255。"""
+    """拼 Xbox 360 标准 8 字节 rumble 包。strong/weak 是 0..255。"""
     packet = bytearray(template or
-                       bytes([0x00, 0x01, 0x0F, 0xC0, 0x00, 0xFF,
-                              0x00, 0xFF, 0x00, 0x00, 0x00, 0x00]))
+                       bytes([0x00, 0x08, 0x00, 0x00,
+                              0x00, 0x00, 0x00, 0x00]))
     packet[strong_byte] = strong & 0xFF
     packet[weak_byte] = weak & 0xFF
     if enable_byte is not None:
@@ -374,8 +373,8 @@ def main():
     ap.add_argument('--sweep', action='store_true', help='扫描厂商报文字节')
     ap.add_argument('--seconds', type=float, default=60)
     ap.add_argument('--strong-byte', type=int, default=3)
-    ap.add_argument('--weak-byte', type=int, default=5)
-    ap.add_argument('--enable-byte', type=int, default=7)
+    ap.add_argument('--weak-byte', type=int, default=4)
+    ap.add_argument('--enable-byte', type=int, default=-1)
     ap.add_argument('--out', default='captures')
     args = ap.parse_args()
 

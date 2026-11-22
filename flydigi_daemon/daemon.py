@@ -180,7 +180,7 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
                   % (_fmt_elapsed(time.time() - t0), index + 1,
                      len(ctrl.profiles), name, letter.upper()))
             if rumble is not None and feedback != 'none':
-                rumble.pulse(200, 120, 120)
+                rumble.pulse(255, 200, 250 if feedback == 'short' else 320)
 
         ctrl.on_switch = on_switch
         statusmod.write(cfg, last_info, profile=mapper.profile.name,

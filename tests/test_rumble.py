@@ -30,12 +30,11 @@ class _FakePad(object):
 
 def test_rumble_packet_bytes():
     packet = rumble_packet(0x12, 0x34)
-    assert len(packet) == 12
+    assert len(packet) == 8
     assert packet[3] == 0x12
-    assert packet[5] == 0x34
-    assert packet[7] == 0xFF
+    assert packet[4] == 0x34
+    assert packet[5:] == b'\x00\x00\x00'
     assert packet[:3] == DEFAULT_TEMPLATE[:3]
-    assert packet[8:] == DEFAULT_TEMPLATE[8:]
 
 
 def test_strong_weak_scale():
@@ -45,9 +44,13 @@ def test_strong_weak_scale():
     assert to_byte(-1) == 0
 
 
-def test_disabled_enable_byte():
-    packet = rumble_packet(1, 2, enable_byte=None)
-    assert packet[7] == DEFAULT_TEMPLATE[7]
+def test_custom_enable_byte_template():
+    template = bytes.fromhex('00 01 0f c0 00 ff 00 ff 00 00 00 00')
+    packet = rumble_packet(1, 2, template=template, strong_byte=3,
+                           weak_byte=5, enable_byte=7)
+    assert packet[3] == 1
+    assert packet[5] == 2
+    assert packet[7] == 0xFF
 
 
 def test_pulse_and_playback_via_fake_pad():
@@ -58,9 +61,9 @@ def test_pulse_and_playback_via_fake_pad():
         rumble.pulse(200, 120, 50)
         rumble.poll(time.time())
         assert pad.packets and pad.packets[-1][3] == 200
-        assert pad.packets[-1][5] == 120
+        assert pad.packets[-1][4] == 120
         rumble.stop()
-        assert pad.packets[-1][3] == 0 and pad.packets[-1][5] == 0
+        assert pad.packets[-1][3] == 0 and pad.packets[-1][4] == 0
     finally:
         rumble.close()
         os.close(ui.wfd)

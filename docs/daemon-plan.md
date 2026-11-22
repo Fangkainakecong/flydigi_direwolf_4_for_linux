@@ -455,18 +455,18 @@ xpad 已经解绑，没有"游戏直接发 USB"的路径。翻译是唯一选择
 
 - 内核给的是 `strong_magnitude` / `weak_magnitude`（0–65535）。
 - 线性缩放到 0–255：`v = round(raw * 255 / 65535)`。
-- 厂商包 12 字节，实测可用：
+- Xbox 360 标准 8 字节包（Direwolf 4 在 PC 模式是 045e:028e
+  XTYPE_XBOX360，和内核 xpad 一致）：
 
 ```
-00 01 0F C0 00 FF 00 FF 00 00 00 00
-      ↑     ↑     ↑
-     [3]   [5]   [7]
+00 08 00 00 00 00 00 00
+      ↑  ↑
+     [3][4]
 ```
 
-`[3]/[5]/[7]` 的具体含义（左马达/右马达/使能）尚未确定。
-`flydigi_ff_probe.py --sweep` 会逐档扫描并让你回答哪边在震，
-结果写进 `captures/ff_*.json`，再回填到 `config/default.toml` 的
-`strong_byte/weak_byte/enable_byte`。
+`[3]` = 左马达，`[4]` = 右马达，0..255。旧模板
+`00 01 0F C0 ...` 只会让 OUT URB 完成，不驱动马达。
+`config/default.toml` 的 `template/strong_byte/weak_byte` 可覆盖。
 
 ### 8.5 限速与降级
 
