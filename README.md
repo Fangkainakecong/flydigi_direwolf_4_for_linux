@@ -452,7 +452,8 @@ python3 -m flydigi_daemon edit
 - 长按手柄按钮会**保持键盘按键按下**，松开手柄才松开键盘（组合键也一样）
 - 摇杆：`deadzone` / `curve` / `max_speed` / `invert`
 - 滚轮（扳机/摇杆）：`deadzone` / `max_hz` / `curve`（比例）或
-  `threshold` / `repeat_hz`（固定）；支持垂直和水平滚轮
+  `threshold` / `repeat_hz`（固定）；支持垂直和水平滚轮，比例模式同时发
+  `REL_WHEEL_HI_RES`（120 单位/格），慢速滚动也平滑
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
 - 视觉效果：深色粒子背景、下雪、不规律流星、鼠标拖尾和点击火花；保留

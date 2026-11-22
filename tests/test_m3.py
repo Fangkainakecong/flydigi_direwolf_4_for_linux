@@ -266,6 +266,23 @@ def test_axis_wheel_auto_defaults_proportional():
     assert fixed.axes['rx'].max_hz == 0
 
 
+def test_wheel_high_res_smooth_slow():
+    mapper = Mapper(profile({'axis': {'rx': {
+        'target': 'wheel:x', 'deadzone': 0.0,
+        'max_hz': 1, 'curve': 1.0,
+    }}}))
+    state = raw(axes=(0, -1, 32767, -1))
+    mapper.apply(state, 0.0)
+    hi = normal = 0
+    for i in range(1, 13):
+        frame = mapper.apply(state, i * 0.1)
+        hi += frame.hwheel_hi
+        normal += frame.hwheel
+    # 1 格/秒 × 1.2 秒 ≈ 144 高分辨率单位 = 1 个标准格
+    assert 120 <= hi <= 160, hi
+    assert normal == 1, normal
+
+
 def test_wheel_threshold_repeat_and_hysteresis():
     mapper = Mapper(profile({'axis': {'lt': {
         'target': 'wheel:up', 'threshold': 0.5,

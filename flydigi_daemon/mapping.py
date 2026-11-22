@@ -463,6 +463,8 @@ class FrameState:
     dy: int = 0
     wheel: int = 0
     hwheel: int = 0
+    wheel_hi: int = 0
+    hwheel_hi: int = 0
     groups: dict = field(default_factory=dict)
     toggled: tuple = ()
 
@@ -586,6 +588,8 @@ class Mapper(object):
         mouse = set()
         wheel = 0
         hwheel = 0
+        wheel_hi = 0
+        hwheel_hi = 0
 
         for source, rule in self.profile.buttons.items():
             if source not in held or not self._active(rule.group):
@@ -597,6 +601,8 @@ class Mapper(object):
                 step = hstep = 0
             wheel += step
             hwheel += hstep
+            wheel_hi += step * 120
+            hwheel_hi += hstep * 120
 
         for axis, rule in self.profile.axes.items():
             value = axis_norm(axis, raw)
@@ -607,13 +613,18 @@ class Mapper(object):
             else:
                 self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
                                  pad_buttons, keys, mouse)
-                step, hstep = self._axis_wheel(rule, value, now, dt)
+                step, hstep, shi, hshi = self._axis_wheel(rule, value, now,
+                                                          dt)
                 wheel += step
                 hwheel += hstep
+                wheel_hi += shi
+                hwheel_hi += hshi
                 step, hstep = self._apply_keypair(rule, value, pad_buttons,
                                                   keys, mouse)
                 wheel += step
                 hwheel += hstep
+                wheel_hi += step * 120
+                hwheel_hi += hstep * 120
 
         dx, dy = self._flush_mouse()
         pad = PadState(buttons=frozenset(pad_buttons), hat=pad.hat,
@@ -622,6 +633,7 @@ class Mapper(object):
         out = FrameState(pad=pad, keys=frozenset(keys),
                          mouse=frozenset(mouse), dx=dx, dy=dy,
                          wheel=int(wheel), hwheel=int(hwheel),
+                         wheel_hi=int(wheel_hi), hwheel_hi=int(hwheel_hi),
                          groups=dict(self.groups),
                          toggled=tuple(toggled))
         self._commit(out)
@@ -769,42 +781,50 @@ class Mapper(object):
 
     def _axis_wheel(self, rule, value, now, dt=0.0):
         if rule.target.kind != 'wheel':
-            return 0, 0
+            return 0, 0, 0, 0
         if rule.invert:
             value = -value
         vector = self._wheel_vector(rule, value)
         if vector is None:
-            return 0, 0
+            return 0, 0, 0, 0
         axis, sign = vector
 
         if rule.max_hz > 0:
-            # 比例滚轮：rate = max_hz * ((|v|-dz)/(1-dz))^curve
+            # 比例滚轮：高分辨率 120 单位/格，慢速也平滑。
+            # 同时输出标准 REL_WHEEL，兼容只认整格的老程序。
             state = self.axis_state.setdefault(
-                id(rule), {'wheel_acc': 0.0, 'hwheel_acc': 0.0,
+                id(rule), {'wheel_hi_acc': 0.0, 'hwheel_hi_acc': 0.0,
+                           'wheel_norm_acc': 0.0, 'hwheel_norm_acc': 0.0,
                            'axis': None, 'sign': 0})
             dz = _clamp(rule.deadzone, 0.0, 0.95)
             mag = abs(value)
             if mag <= dz:
-                state['wheel_acc'] = 0.0
-                state['hwheel_acc'] = 0.0
+                for key in ('wheel_hi_acc', 'hwheel_hi_acc',
+                            'wheel_norm_acc', 'hwheel_norm_acc'):
+                    state[key] = 0.0
                 state['axis'] = None
                 state['sign'] = 0
-                return 0, 0
+                return 0, 0, 0, 0
             if state['axis'] != axis or state['sign'] != sign:
-                state['wheel_acc'] = 0.0
-                state['hwheel_acc'] = 0.0
+                for key in ('wheel_hi_acc', 'hwheel_hi_acc',
+                            'wheel_norm_acc', 'hwheel_norm_acc'):
+                    state[key] = 0.0
                 state['axis'] = axis
                 state['sign'] = sign
             norm = (mag - dz) / (1.0 - dz)
             if rule.curve and rule.curve != 1.0:
                 norm = norm ** rule.curve
-            key = 'wheel_acc' if axis == 'y' else 'hwheel_acc'
-            state[key] += rule.max_hz * norm * dt * sign
-            steps = int(state[key])
-            state[key] -= steps
+            hi_key = 'wheel_hi_acc' if axis == 'y' else 'hwheel_hi_acc'
+            norm_key = 'wheel_norm_acc' if axis == 'y' else 'hwheel_norm_acc'
+            state[hi_key] += rule.max_hz * norm * dt * sign * 120.0
+            hi = int(state[hi_key])
+            state[hi_key] -= hi
+            state[norm_key] += hi
+            steps = int(state[norm_key] / 120.0)
+            state[norm_key] -= steps * 120.0
             if axis == 'y':
-                return steps, 0
-            return 0, steps
+                return steps, 0, hi, 0
+            return 0, steps, 0, hi
 
         state = self.axis_state.setdefault(
             id(rule), {'active': False, 'next': 0.0,
@@ -817,17 +837,17 @@ class Mapper(object):
         if state['active']:
             if mag <= rule.release_threshold:
                 state['active'] = False
-                return 0, 0
+                return 0, 0, 0, 0
             if rule.repeat_hz <= 0:
-                return 0, 0
+                return 0, 0, 0, 0
             interval = 1.0 / rule.repeat_hz
             steps = 0
             while now >= state['next'] and steps < 10:
                 steps += 1
                 state['next'] += interval
             if axis == 'y':
-                return sign * steps, 0
-            return 0, sign * steps
+                return sign * steps, 0, sign * steps * 120, 0
+            return 0, sign * steps, 0, sign * steps * 120
         if mag >= rule.threshold:
             state['active'] = True
             state['axis'] = axis
@@ -835,9 +855,9 @@ class Mapper(object):
             interval = 1.0 / rule.repeat_hz if rule.repeat_hz > 0 else 0.0
             state['next'] = now + interval
             if axis == 'y':
-                return sign, 0
-            return 0, sign
-        return 0, 0
+                return sign, 0, sign * 120, 0
+            return 0, sign, 0, sign * 120
+        return 0, 0, 0, 0
 
     def _apply_keypair(self, rule, value, pad_buttons, keys, mouse):
         if rule.target.kind != 'keypair':
@@ -864,7 +884,8 @@ class Mapper(object):
         self.devices.pad.apply(out.pad)
         self.devices.keyboard.apply(out.keys)
         self.devices.mouse.apply(out.mouse, out.dx, out.dy,
-                                 out.wheel, out.hwheel)
+                                 out.wheel, out.hwheel,
+                                 out.wheel_hi, out.hwheel_hi)
 
 
 def describe(prev, cur):
