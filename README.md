@@ -4,6 +4,239 @@
 openflydigi 的分支延续：上游明确不支持老协议手柄（`045e:028e`，无 HID vendor
 collection），本项目在其转录的**老方言 (XInput legacy) 协议**基础上继续。
 
+## 项目简介
+
+这是一个在 **Ubuntu 22.04 / Linux** 上，为 **飞智冰原狼4（Flydigi Direwolf 4）2.4G dongle**
+补齐 Windows「飞智空间站」核心能力的用户态项目。
+
+它不修改内核驱动、不依赖 Steam Input，也不使用厂商 GUI；用 Python 直接操作
+USB dongle，把输入翻译成标准的 uinput Xbox 手柄 + 键盘 + 鼠标。目标是在保留
+标准手柄功能的前提下，获得：
+
+- 体感（陀螺仪）→ 鼠标
+- 手柄键 → 键盘 / 鼠标 / 滚轮 / 手柄键
+- 四套配置，`SELECT + A/B/X/Y` 切换
+- 游戏震动透传、切配置震动反馈
+- 本地网页可视化编辑 + 自动启停
+
+支持范围是空间站第 1 类能力（重映射/曲线/体感/配置）；灯光、屏幕、
+ForceAdapt、按游戏自动切配置不在本项目范围内。
+
+### 功能
+
+| 功能 | 状态 |
+|---|---|
+| 标准 Xbox 手柄透明转发（按钮/摇杆/扳机/十字键） | ✅ 硬件验收 |
+| M1/M2/FN/Turbo 可见、可映射 | ✅ |
+| `SELECT+A/B/X/Y` 软件四槽 + `state.json` 记忆 | ✅ |
+| 按钮/轴 → 手柄、键盘、鼠标、滚轮、组开关 | ✅ |
+| 键盘组合键、鼠标方向/滚轮、轴死区/曲线 | ✅ |
+| 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
+| `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
+| 本地可视化编辑器、电量显示、保存后退出 | ✅ |
+| systemd 自动启停、1 小时空闲退出 | ✅ 已安装 active |
+| 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
+
+### 命令速查
+
+| 命令 | 作用 |
+|---|---|
+| `python3 -m flydigi_daemon check` | 识别设备、读电量/固件、审计当前板载槽 |
+| `python3 -m flydigi_daemon run` | 独占 dongle，创建虚拟手柄/键盘/鼠标 |
+| `python3 -m flydigi_daemon run --replay x.bin --dry-run` | 无手柄回放抓包 |
+| `python3 -m flydigi_daemon calibrate` | 体感三步标定（静置/3 圈/90°） |
+| `python3 -m flydigi_daemon show [--html]` | 终端/HTML 映射预览 |
+| `python3 -m flydigi_daemon edit` | 启动本地网页编辑器（保存/关闭后退出） |
+| `python3 -m flydigi_daemon devices` | 列出 `045e:028e`，标出会接管哪一个 |
+| `python3 -m flydigi_daemon watch` | 按设备/活动启停（systemd 服务内部用） |
+| `python3 -m flydigi_daemon logs [-f]` | 查看 daemon/watch/编辑器日志 |
+| `python3 -m flydigi_daemon release` | 清理 XTEST 卡住的键/鼠标（通用） |
+
+`run` 常用参数：`--profile desktop`、`--calibration path`、`--seconds N`。
+`edit` 常用参数：`--port 8800`、`--no-open`、`--idle-timeout`、
+`--page-close-grace`。
+
+### 快速使用
+
+```bash
+sudo apt install python3-evdev python3-tomli
+cd ~/projects/flydigi_direwolf_4_for_linux
+
+# 1. 识别 + 当前板载槽审计（会短暂接管，再恢复 xpad）
+sudo python3 -m flydigi_daemon check
+
+# 2. 手动运行（自动启停装好后由 systemd 负责）
+sudo python3 -m flydigi_daemon run
+
+# 3. 图形化改映射（保存后自动退出）
+python3 -m flydigi_daemon edit
+
+# 4. 自动启停（已安装过可跳过）
+sudo scripts/install_services.sh
+python3 -m flydigi_daemon devices
+```
+
+配置默认在 `config/default.toml`；个人改动写到 `config/user.toml`
+（深合并，模板 `config/user.example.toml`）。daemon 只接管产品名匹配
+`Direwolf 4` 的 dongle；黑武士2（`Flydigi 2.4G Android`）不会被映射。
+
+### 目录树
+
+```text
+flydigi_direwolf_4_for_linux/
+├── README.md                         # 本文件：介绍、命令、目录、技术栈、历史
+├── flydigi-mapping.desktop           # 项目内快捷方式；桌面另有一份
+├── flydigi_daemon/                   # 正式 daemon（M1 起）
+│   ├── __init__.py                   # 包版本
+│   ├── __main__.py                   # CLI 子命令入口
+│   ├── daemon.py                     # 主循环：USB 输入→映射→uinput，FF/idle/信号
+│   ├── usb.py                        # usbfs ioctl/异步 URB、老方言、设备匹配、takeover
+│   ├── report.py                     # 32 字节报文解码、回包识别、gyro 去回绕
+│   ├── translate.py                  # PadState、报文→状态、空闲判定
+│   ├── slots.py                      # SELECT+ABXY 四槽仲裁、state.json
+│   ├── mapping.py                    # 映射 DSL、轴规则、lint、目标格式化
+│   ├── devices.py                    # uinput Xbox/键盘/鼠标、capability、差量写入
+│   ├── rumble.py                     # FF_RUMBLE 上传/播放 → 12 字节 rumble 包
+│   ├── calibrate.py                  # 体感标定（静置/3 圈/90°、常数/估算）
+│   ├── status.py                     # 电量/固件 status.json、网页刷新信号
+│   ├── watch.py                      # dongle/活动监测，启停 systemd daemon
+│   ├── config.py                     # default.toml + user.toml 深合并
+│   ├── check.py                      # 识别 + 当前板载槽 blob 审计
+│   ├── show.py                       # 终端映射表、自包含 HTML 可视化
+│   ├── ui.py                         # 本地网页编辑器服务端
+│   ├── ui.html                       # 编辑器前端（HTML/CSS/JS）
+│   ├── logs.py                       # journal + 编辑器日志入口
+│   └── xrelease.py                   # 通用 XTEST 幽灵按键清理
+├── scripts/
+│   ├── flydigi_usb.py                # 兼容层 → flydigi_daemon.usb
+│   ├── flydigi_report.py             # 兼容层 → flydigi_daemon.report
+│   ├── flydigi_2.4g_usbfs_probe.py   # 早期 usbfs/URB/rumble 验证
+│   ├── flydigi_2.4g_raw_motion_test.py # 原始运动流实验
+│   ├── flydigi_old_dialect_probe.py  # 老方言 cmd16/17/80 探针
+│   ├── flydigi_legacy_blob_read.py   # 读槽位 blob 的早期脚本
+│   ├── flydigi_blob_audit.py         # 四槽 840 字节审计
+│   ├── flydigi_bean_translate.py     # Windows .dat → 840 字节翻译
+│   ├── flydigi_button_probe.py       # 全输入/按键位图探针
+│   ├── flydigi_control_probe.py      # 可控分段抓包（SELECT/ABXY/FN）
+│   ├── flydigi_capture_decode.py     # 抓包解码/断点/按键统计
+│   ├── flydigi_capture_to_text.py    # .bin → 文本时间线
+│   ├── flydigi_gap_report.py         # 1000 Hz 断点分析
+│   ├── flydigi_stick_monitor.py      # 摇杆/扳机范围监视
+│   ├── flydigi_motion_capture.py     # 体感分段采集
+│   ├── flydigi_motion_phases_test.py # 定时运动阶段实验
+│   ├── flydigi_accel_probe.py        # `[21..24]` 姿态/加速度实验
+│   ├── flydigi_dinput_probe.py       # DInput 模式探测
+│   ├── flydigi_uinput_ident_probe.py # 三台 uinput capability/GUID 验证
+│   ├── flydigi_ff_probe.py           # FF 上传/播放/强度扫描
+│   ├── procon_keepalive.py           # Switch Pro 模式保活实验
+│   ├── flydigi_edit.sh               # 编辑器启动脚本（快捷方式 Exec）
+│   └── install_services.sh           # 安装/卸载 flydigi-watch + daemon 服务
+├── systemd/
+│   ├── flydigi-dw4.service.in        # daemon unit 模板（@ROOT@ 替换）
+│   └── flydigi-watch.service.in      # watch unit 模板
+├── config/
+│   ├── default.toml                  # 带注释的默认配置（四 profile）
+│   ├── user.example.toml             # 个人覆盖层模板
+│   ├── calibration.example.json      # 标定文件格式示例
+│   ├── user.toml                     # 本地个人配置（gitignore）
+│   ├── calibration.json              # 本地标定（gitignore）
+│   └── mappings.html                 # show 生成的页面（gitignore）
+├── tests/
+│   ├── test_m1.py                    # 报文→状态、capability
+│   ├── test_m2.py                    # 四槽仲裁/state
+│   ├── test_m3.py                    # 映射 DSL/轴/滚轮/范围
+│   ├── test_m4.py                    # 体感积分/标定
+│   ├── test_rumble.py                # FF 包格式/脉冲
+│   ├── test_show.py                  # 映射预览/HTML
+│   ├── test_ui.py                    # 编辑器/改名/保存退出/HTTP
+│   ├── test_services.py              # 设备选择/空闲判定/cfg
+│   ├── test_devices_release.py       # 强制释放
+│   └── test_release.py               # XTEST 释放/无 DISPLAY
+├── docs/
+│   ├── daemon-plan.md                # 架构/方案/M0–M7 任务与验收
+│   ├── input-report.md               # 32 字节报文权威布局
+│   ├── inputs-quickref.md            # 输入/体感/加速度一页速查
+│   ├── findings-motion.md            # 角速度、姿态字节、加速度实测
+│   ├── findings-slot-audit.md        # 四槽/按键复核/切槽假象
+│   ├── findings-profile-blob.md      # 840 字节 profile 格式
+│   ├── findings-onboard-remap.md     # 板载重映射字段
+│   ├── findings-other-devices.md     # 同代设备/协议旁证
+│   ├── findings-public-sources.md    # 外部资料（六轴/量纲）
+│   ├── findings-steam.md             # Steam/SDL 行为
+│   ├── findings-legacy-measured.md   # 老方言实测记录
+│   ├── findings-games.md             # 游戏内验收记录
+│   ├── PROTOCOL.md                   # 协议摘要
+│   ├── plan.md / scope.md            # 早期方案与范围
+│   ├── inventory.md / data.md        # 数据/文件清单
+│   ├── scripts.md                    # 探针与 daemon 用法
+│   └── windows-files.md              # Windows 侧文件说明
+├── reference/openflydigi/            # 只读上游参考（不参与运行）
+│   ├── mapping.py                    # 840 字节 blob 解析/写入
+│   ├── mapping_bean.py               # .dat bean → blob
+│   ├── motion.py                     # Apex5 厂商 motion 流参考
+│   ├── evdev.py / uhid.py            # 上游 evdev/uhid 参考
+│   ├── identity.py / device.py       # 识别/设备层参考
+│   ├── blobs.py / effects.py         # blob/灯效参考
+│   └── games.py / prefs.py           # 上游辅助模块
+├── data/
+│   ├── MANIFEST.md                   # 文本抓包索引
+│   └── txt/                          # 文本抓包、审计 JSON、翻译结果
+├── captures/                         # 原始 .bin 抓包（gitignore）
+└── windows-dump/                     # Windows 厂商文件（gitignore，只读）
+```
+
+### 技术栈
+
+- **语言**：Python 3.10（Ubuntu 22.04 自带）
+- **USB**：Linux usbfs + `ctypes` ioctl，异步 interrupt URB（没有 libusb 依赖）
+- **输入**：Linux evdev / uinput；虚拟 Xbox 360 手柄 GUID
+  `030000005e0400008e02000014010000`
+- **震动**：uinput `EV_FF` / `FF_RUMBLE`，翻译成 EP 0x05 的 12 字节厂商包
+- **配置**：TOML（`tomli`），`default.toml` + `user.toml` 深合并
+- **编辑器**：Python 标准库 `http.server` + 原生 HTML/CSS/JS；只监听
+  `127.0.0.1`
+- **服务**：systemd + journald；`flydigi-watch` 按需启停 `flydigi-dw4`
+- **辅助**：X11 `libXtst`（可选的 XTEST 卡键清理）、`evdev` 的 Gamepad API
+  录制
+- **逆向参考**：`reference/openflydigi/`（上游只读，不参与运行）
+
+数据通路：
+
+```text
+dongle 045e:028e
+  → usbfs 异步 URB (1000 Hz)
+  → report.decode / translate.PadState
+  → slots (SELECT+ABXY)
+  → mapping DSL (按钮/轴/体感)
+  → uinput 虚拟 Xbox 手柄 + 键盘 + 鼠标
+  → 游戏 / 桌面
+
+FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
+```
+
+### 开发历程
+
+- **2026-11-18**：usbfs/URB 打通，确认老方言帧与 32 字节 XInput 报文。
+- **2026-11-19**：完整解码按钮/摇杆/扳机/飞智位图；cmd16/33/80 通道；
+  四槽 blob 审计（槽 3 干净）；体感定位（`[14..16]` int8 角速度，
+  约 89 Hz）；加速度计确认为硬件六轴但 2.4G 不输出。
+- **2026-11-20**：M1 透明转发、三台 uinput、M2 软件四槽
+  （`SELECT+A/B/X/Y`）硬件验收。
+- **2026-11-21**：M3 映射 DSL、`user.toml`、`show`、可视化编辑器；
+  M4 体感积分/三步标定/int8 回绕修复；自动启停设计。
+- **2026-11-22**：M5 震动（FF_RUMBLE/切槽反馈）、电量在线刷新、
+  systemd watch 安装并 active、日志/参数范围、编辑器保存/关闭退出；
+  与黑武士2（`Flydigi 2.4G Android`）同插时按产品名隔离。
+
+### 范围与限制
+
+- 不实现灯光、屏幕、ForceAdapt、按游戏自动切 profile。
+- 不实现宏；连发/turbo 由板载固件负责。
+- 2.4G 报文只有三轴角速度，没有原始加速度；真正的“平移→鼠标”不可用。
+- FF 目前只处理 `FF_RUMBLE`；复杂周期效果会忽略。
+- 编辑器保存后自动退出；页面关闭且未修改约 20 秒后退出；默认 30 分钟
+  无请求也会退出，不常驻后台。
+
 ## 目标
 
 在 Ubuntu 22.04 上，让冰原狼4 的 2.4G dongle 达到 Windows 飞智空间站的效果：

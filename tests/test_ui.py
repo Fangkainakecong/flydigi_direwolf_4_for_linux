@@ -300,6 +300,7 @@ def _free_port():
 class _EditArgs(object):
     no_open = True
     idle_timeout = 0
+    page_close_grace = 20
     port = 0
 
 
@@ -347,6 +348,38 @@ def test_editor_idle_exits():
             thread.start()
             thread.join(4)
             assert not thread.is_alive(), '空闲超时没有退出'
+        finally:
+            ui.cfgmod.USER_PATH = old_user
+
+
+def test_editor_page_close_exits_when_clean():
+    old_user = ui.cfgmod.USER_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
+        args = _EditArgs()
+        args.port = _free_port()
+        args.page_close_grace = 0.2
+        thread = threading.Thread(target=ui.run,
+                                  args=(config.load(), args), daemon=True)
+        try:
+            thread.start()
+            conn = None
+            for _ in range(30):
+                try:
+                    conn = http.client.HTTPConnection('127.0.0.1', args.port,
+                                                      timeout=1)
+                    conn.request('GET', '/')
+                    if conn.getresponse().status == 200:
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            assert conn is not None
+            conn.request('POST', '/api/closed',
+                         body=json.dumps({'dirty': False}),
+                         headers={'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            thread.join(3)
+            assert not thread.is_alive(), '干净页面关闭后没有退出'
         finally:
             ui.cfgmod.USER_PATH = old_user
 

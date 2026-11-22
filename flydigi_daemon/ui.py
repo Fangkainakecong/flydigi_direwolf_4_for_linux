@@ -152,7 +152,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 4, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 5, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +394,8 @@ class EditorServer(ThreadingHTTPServer):
         super().__init__(*args, **kwargs)
         self.last_request = time.time()
         self.saved = False
+        self.page_closed = None
+        self.page_dirty = False
 
 
 def make_handler(model, cfg):
@@ -416,6 +418,9 @@ def make_handler(model, cfg):
         def do_GET(self):                        # noqa: N802
             if self.path in ('/', '/index.html'):
                 self.server.last_request = time.time()
+                # 新页面打开：取消上一次 pagehide 的关闭倒计时。
+                self.server.page_closed = None
+                self.server.page_dirty = False
                 self._send(200, render_page(state['model']), 'text/html')
             elif self.path == '/api/model':
                 self.server.last_request = time.time()
@@ -431,6 +436,20 @@ def make_handler(model, cfg):
                 self._send(404, 'not found', 'text/plain')
 
         def do_POST(self):                       # noqa: N802
+            if self.path == '/api/closed':
+                length = int(self.headers.get('Content-Length') or 0)
+                dirty = False
+                if 0 < length <= 4096:
+                    try:
+                        data = json.loads(self.rfile.read(length).decode(
+                            'utf-8'))
+                        dirty = bool(data.get('dirty'))
+                    except (ValueError, UnicodeDecodeError):
+                        pass
+                self.server.page_closed = time.time()
+                self.server.page_dirty = dirty
+                self._send(204, '', 'text/plain')
+                return
             if self.path == '/api/refresh':
                 statusmod.request_refresh()
                 self.server.last_request = time.time()
@@ -502,6 +521,7 @@ def run(cfg, args):
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
 
     idle = max(0.0, float(getattr(args, 'idle_timeout', 1800) or 0))
+    close_grace = max(0.0, float(getattr(args, 'page_close_grace', 20) or 0))
 
     def monitor():
         while True:
@@ -509,6 +529,12 @@ def run(cfg, args):
             if server.saved:
                 time.sleep(0.5)
                 print('已保存，编辑器退出')
+                server.shutdown()
+                return
+            closed_at = server.page_closed
+            if (closed_at is not None and not server.page_dirty
+                    and time.time() - closed_at >= close_grace):
+                print('页面已关闭且没有修改，编辑器退出')
                 server.shutdown()
                 return
             if idle and time.time() - server.last_request > idle:

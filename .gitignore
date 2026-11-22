@@ -1,7 +1,7 @@
 captures/
 __pycache__/
 *.pyc
-config/calibration.json
+config/calibration.json*
 state.json
 
 # 从 Windows 拿过来的厂商文件：只读，不入库

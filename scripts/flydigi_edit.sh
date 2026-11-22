@@ -32,7 +32,7 @@ fi
 
 model=$(curl -fsS --max-time 1 "${URL}api/model" 2>/dev/null || true)
 case "$model" in
-  *'"editor": 4'*|*'"editor":4'*)
+  *'"editor": 5'*|*'"editor":5'*)
     open_url
     exit 0
     ;;

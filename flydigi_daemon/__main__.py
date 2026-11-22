@@ -92,6 +92,8 @@ def build_parser():
                     help='不自动打开浏览器')
     ed.add_argument('--idle-timeout', type=float, default=1800,
                     help='无请求多少秒后自动退出（默认 1800，0=不超时）')
+    ed.add_argument('--page-close-grace', type=float, default=20,
+                    help='页面关闭且没有修改后多少秒退出（默认 20）')
 
     sh = sub.add_parser('show', help='打印映射表 / 生成可视化 HTML')
     sh.add_argument('--config', default=None)

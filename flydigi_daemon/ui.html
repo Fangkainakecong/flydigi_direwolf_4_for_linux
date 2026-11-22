@@ -681,6 +681,7 @@ function collect() {
 }
 
 const status = document.getElementById('status');
+let dirty = false;
 function setStatus(text, cls) {
   status.textContent = text;
   status.className = cls || '';
@@ -688,9 +689,19 @@ function setStatus(text, cls) {
 
 document.querySelectorAll('.panel input').forEach(input => {
   input.addEventListener('input', () => {
+    dirty = true;
     if (!status.classList.contains('err')) setStatus('有未保存的修改');
   });
 });
+function notifyClosed() {
+  try {
+    navigator.sendBeacon('/api/closed', JSON.stringify({dirty}));
+  } catch (err) {
+    // ignore
+  }
+}
+window.addEventListener('pagehide', notifyClosed);
+window.addEventListener('beforeunload', notifyClosed);
 
 async function refreshStatus() {
   const battery = document.getElementById('battery');
@@ -730,6 +741,7 @@ document.getElementById('save').addEventListener('click', async () => {
     });
     const data = await response.json();
     if (data.ok) {
+      dirty = false;
       setStatus('已保存到 ' + data.path + '；编辑器正在退出，可以关闭页面。', 'ok');
     } else {
       setStatus('保存失败：\n' + (data.errors || []).join('\n'), 'err');
