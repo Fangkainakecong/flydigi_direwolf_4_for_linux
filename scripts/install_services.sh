@@ -1,8 +1,8 @@
 #!/bin/sh
 # 安装/切换/卸载 Flydigi systemd 服务。需要 root。
 #
-#   sudo scripts/install_services.sh install  # daemon 开机自启 + udev（默认）
-#   sudo scripts/install_services.sh --watch  # 可选：watch 按需启停
+#   sudo scripts/install_services.sh install  # daemon 开机自启 + udev（默认，不装 watch）
+#   sudo scripts/install_services.sh --watch  # 可选：安装 watch 按需启停
 #   sudo scripts/install_services.sh remove   # 停止并删除 service/udev/polkit
 #   install/remove 与 --daemon/--remove 等旧写法都兼容
 set -eu
@@ -99,11 +99,13 @@ case "$MODE" in
     ;;
 
   ""|--daemon|install)
+    # daemon-only 模式不安装 watch unit；如果以前装过，顺手清掉。
+    systemctl disable --now "$WATCH" 2>/dev/null || true
+    systemctl reset-failed "$WATCH" 2>/dev/null || true
+    rm -f "$SYSTEMD/$WATCH"
     sed "s|@ROOT@|$ROOT|g" "$ROOT/systemd/flydigi-dw4.service.in" \
       > "$SYSTEMD/$DAEMON"
-    sed "s|@ROOT@|$ROOT|g" "$ROOT/systemd/flydigi-watch.service.in" \
-      > "$SYSTEMD/$WATCH"
-    chmod 644 "$SYSTEMD/$DAEMON" "$SYSTEMD/$WATCH"
+    chmod 644 "$SYSTEMD/$DAEMON"
     install -m 644 "$ROOT/udev/$RULE" "$UDEV/$RULE"
     systemctl daemon-reload
     udevadm control --reload-rules 2>/dev/null || true
@@ -111,12 +113,11 @@ case "$MODE" in
     systemctl reset-failed "$DAEMON" 2>/dev/null || true
     install_polkit
     install_sudoers
-    systemctl disable --now "$WATCH" 2>/dev/null || true
     systemctl enable --now "$DAEMON"
     systemctl restart "$DAEMON"
-    echo "已启用 daemon-only 模式：$DAEMON 开机自启；watch 已停用（代码保留）"
+    echo "已启用 daemon-only 模式：$DAEMON 开机自启；watch 未安装"
     echo "  日志: journalctl -u $DAEMON -f"
-    echo "  切回 watch: sudo $0 --watch"
+    echo "  需要 watch 时: sudo $0 --watch"
     exit 0
     ;;
 

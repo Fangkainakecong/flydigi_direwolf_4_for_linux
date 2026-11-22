@@ -35,7 +35,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
 | 本地可视化编辑器、电量显示、保存后继续编辑 | ✅ |
 | 状态栏托盘：暂停/恢复、配置选择、编辑、重启、退出 | ✅ 当前已运行 |
-| systemd：daemon 开机自启 + udev 插拔；watch 可选 | ✅ |
+| systemd：daemon 开机自启 + udev；默认不装 watch，`--watch` 可选 | ✅ |
 | 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
 
 ### 命令速查
@@ -297,7 +297,7 @@ FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
   daemon 处理游戏 FF 上传/播放，翻译成 12 字节 rumble 包；
   `SELECT+A/B/X/Y` 成功切换时会短震一次（`[feedback] profile_switch`）
 - ✅ **M6 服务化**：默认 **daemon-only**（`flydigi-dw4` 开机自启 + udev
-  检测 dongle），不再常驻 watch；watch 代码保留，可用 `--watch` 切回
+  检测 dongle）；默认**不安装 watch unit**，代码保留，需要时用 `--watch` 装回
 - ⏳ 宏按需再加（**连发由板载负责**，daemon 不做软件连发）
 
 ### 快速开始
@@ -468,7 +468,7 @@ python3 -m flydigi_daemon edit
 ## 自动启停（systemd）
 
 默认是 **daemon-only**：`flydigi-dw4` 开机自启，udev 规则在 dongle 插入时
-拉起它；`flydigi-watch` 代码保留但**不启动**，省掉一个常驻进程。
+拉起它；默认**不安装、不启动** `flydigi-watch`，省掉一个常驻进程。
 
 先确认会选对设备（两个手柄都插着也能看出来）：
 
@@ -500,9 +500,9 @@ journalctl -u flydigi-dw4 -f
 - 拔掉 dongle → daemon 退出并恢复 xpad
 - 冰原狼4 无线约 15 分钟休眠时：daemon 继续运行，400 ms 没输入会先释放
   所有按键，醒来立即恢复
-- 不再需要 `flydigi-watch`，节省约 12 MB 常驻内存
-- 若切回 `--watch` 模式，可把 `[daemon] idle_exit_s` 设回 3600，由 watch
-  在下次操作时重新启动
+- 默认没有 `flydigi-watch` 服务和进程，节省约 12 MB 常驻内存
+- 若切回 `--watch` 模式，会安装 watch unit；可把 `[daemon] idle_exit_s`
+  设回 3600，由 watch 在下次操作时重新启动
 
 udev 只匹配 `Flydigi Direwolf 4`，不会因为黑武士2 插拔而启动 daemon。
 
@@ -557,7 +557,7 @@ scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式�
 ```bash
 python3 -m flydigi_daemon logs          # daemon/watch journal + 编辑器日志
 python3 -m flydigi_daemon logs -f       # 持续跟随
-journalctl -u flydigi-watch -u flydigi-dw4 -f
+journalctl -u flydigi-dw4 -f
 ```
 
 - daemon / watch → systemd journal（自动写入；当前总 journal 约 64 MB）
