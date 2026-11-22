@@ -206,8 +206,54 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         prev_extras = frozenset()
         prev_raw = None
         last_activity = time.time()
+        next_pause_check = 0.0
+        statusmod.clear_control()
         while flag['running']:
             now = time.time()
+            if now >= next_pause_check:
+                next_pause_check = now + 0.2
+                if os.path.exists(statusmod.PAUSE_FILE):
+                    try:
+                        os.unlink(statusmod.PAUSE_FILE)
+                    except OSError:
+                        pass
+                    if devs is not None:
+                        devs.release_all()
+                    if rumble is not None:
+                        rumble.stop()
+                    mapper.reset()
+                    prev = mapper.out
+                    statusmod.write(
+                        cfg, last_info, profile=mapper.profile.name,
+                        profile_slot=profile_slot_of(mapper.profile.name),
+                        paused=True)
+                    print('映射已挂起：进程保留，等待恢复')
+                    if link is not None:
+                        for uid in list(link.in_ids):
+                            pad.discard(uid)
+                        link.in_ids.clear()
+                    while (flag['running']
+                           and not os.path.exists(statusmod.RESUME_FILE)):
+                        time.sleep(0.2)
+                    try:
+                        os.unlink(statusmod.RESUME_FILE)
+                    except OSError:
+                        pass
+                    if not flag['running']:
+                        break
+                    if link is not None:
+                        link.reset_urbs()
+                    statusmod.write(
+                        cfg, last_info, profile=mapper.profile.name,
+                        profile_slot=profile_slot_of(mapper.profile.name),
+                        paused=False)
+                    print('映射已恢复')
+                    last_activity = time.time()
+                    gap_released = False
+                    last_battery = 0.0
+                    battery_pending = False
+                    next_pause_check = time.time() + 0.2
+                    continue
             if rumble is not None:
                 rumble.poll(now)
             if (battery_every > 0 and not battery_pending
@@ -328,6 +374,7 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             pass
         pad.reconnect_driver()
         pad.close()
+        statusmod.clear_control()
         print('xpad 已恢复')
     return 0
 

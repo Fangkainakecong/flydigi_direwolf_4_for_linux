@@ -12,8 +12,36 @@ import os
 import tempfile
 import time
 
+PAUSE_FILE = '/tmp/flydigi-pause'
+RESUME_FILE = '/tmp/flydigi-resume'
 
-def write(cfg, info, profile=None, profile_slot=None):
+
+def _touch(path):
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(str(time.time()))
+        return True
+    except OSError:
+        return False
+
+
+def request_pause():
+    return _touch(PAUSE_FILE)
+
+
+def request_resume():
+    return _touch(RESUME_FILE)
+
+
+def clear_control():
+    for path in (PAUSE_FILE, RESUME_FILE):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def write(cfg, info, profile=None, profile_slot=None, paused=False):
     from . import config as cfgmod
     path = cfgmod.status_file(cfg)
     old = {}
@@ -51,6 +79,7 @@ def write(cfg, info, profile=None, profile_slot=None):
         'slot': info.get('slot', old.get('slot')),
         'fw': info.get('fw', old.get('fw')),
         'uid': info.get('uid', old.get('uid')),
+        'paused': bool(paused),
         'updated': time.time(),
         'updated_text': time.strftime('%Y-%m-%d %H:%M:%S'),
     }

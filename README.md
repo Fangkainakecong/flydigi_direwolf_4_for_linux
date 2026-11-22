@@ -545,7 +545,10 @@ scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式�
 菜单：
 
 - 状态：daemon、当前配置/槽位、电量（休眠时显示上次值）
-- 暂停映射 / 恢复映射（stop/start `flydigi-dw4`）
+- 暂停映射 / 恢复映射：暂停 = daemon 释放按键/鼠标、停止震动、丢弃
+  in-flight URB，然后进入等待恢复的挂起循环；进程保留、内存保留、CPU
+  接近 0，不会退出。恢复 = 通知它重新挂 URB 继续转发。挂起期间物理手柄
+  仍被 daemon 独占，所以游戏暂时收不到手柄输入；要让标准 xpad 接手请停止服务。
 - 配置选择：二级菜单列出全部 profile，点一下重启 daemon 并应用
 - 编辑配置（启动 `flydigi_edit.sh`）
 - 重启程序

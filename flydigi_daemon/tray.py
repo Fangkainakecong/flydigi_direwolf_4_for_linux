@@ -44,7 +44,7 @@ def _ensure_icon():
     return ICON_SRC if os.path.exists(ICON_SRC) else 'input-gaming-symbolic'
 
 
-def _systemctl(action):
+def _run_systemctl(argv):
     """返回 (ok, 错误文本)。
 
     先用 `sudo -n`（免密规则，绝不弹窗），再用 `systemctl --no-ask-password`
@@ -54,7 +54,7 @@ def _systemctl(action):
     if SUDO:
         try:
             proc = subprocess.run(
-                [SUDO, '-n', SYSTEMCTL, action, SERVICE],
+                [SUDO, '-n', SYSTEMCTL] + argv,
                 check=False, capture_output=True, text=True)
             if proc.returncode == 0:
                 return True, ''
@@ -63,7 +63,7 @@ def _systemctl(action):
             errors.append(repr(exc))
     try:
         proc = subprocess.run(
-            [SYSTEMCTL, '--no-ask-password', action, SERVICE],
+            [SYSTEMCTL, '--no-ask-password'] + argv,
             check=False, capture_output=True, text=True)
         if proc.returncode == 0:
             return True, ''
@@ -72,13 +72,17 @@ def _systemctl(action):
         errors.append(repr(exc))
 
     err = '\n'.join(e for e in errors if e) or 'systemctl 执行失败'
-    print('systemctl %s 失败: %s' % (action, err), file=sys.stderr)
+    print('systemctl %s 失败: %s' % (' '.join(argv), err), file=sys.stderr)
     return False, err + '\n\n' + INSTALL_HINT
+
+
+def _systemctl(action):
+    return _run_systemctl([action, SERVICE])
 
 
 def _state():
     try:
-        out = subprocess.run(['systemctl', 'is-active', SERVICE],
+        out = subprocess.run([SYSTEMCTL, 'is-active', SERVICE],
                              check=False, capture_output=True,
                              text=True).stdout.strip()
         return out or 'unknown'
@@ -176,18 +180,24 @@ class Tray(object):
 
     def refresh(self):
         state = _state()
-        label = {'active': '运行中', 'inactive': '已停止',
-                 'failed': '失败', 'activating': '启动中',
-                 'deactivating': '停止中', 'reloading': '重载中'}.get(state,
-                                                                     state)
-        self.state_item.set_label('daemon: ' + label)
-        running = state in ('active', 'activating', 'reloading')
-        self.toggle_item.set_label('暂停映射' if running else '恢复映射')
         try:
             cfg = cfgmod.load()
             info = statusmod.read(cfg)
         except (SystemExit, Exception):     # noqa: BLE001
             cfg, info = self.cfg, None
+        paused = (bool(info and info.get('paused'))
+                  and state in ('active', 'activating', 'reloading'))
+        if paused:
+            label = '已挂起'
+        else:
+            label = {'active': '运行中', 'inactive': '已停止',
+                     'failed': '失败', 'activating': '启动中',
+                     'deactivating': '停止中', 'reloading': '重载中'
+                     }.get(state, state)
+        self.state_item.set_label('daemon: ' + label)
+        running = state in ('active', 'activating', 'reloading')
+        self.toggle_item.set_label(
+            '恢复映射' if paused or not running else '暂停映射')
         self._rebuild_profiles(cfg)
 
         current = None
@@ -230,18 +240,32 @@ class Tray(object):
 
     def toggle(self):
         state = _state()
-        action = 'stop' if state in ('active', 'activating', 'reloading') \
-            else 'start'
-        ok, err = _systemctl(action)
+        try:
+            info = statusmod.read(cfgmod.load())
+        except (SystemExit, Exception):     # noqa: BLE001
+            info = None
+        paused = (bool(info and info.get('paused'))
+                  and state in ('active', 'activating', 'reloading'))
+        if paused:
+            ok = statusmod.request_resume()
+            action = '恢复'
+            err = '' if ok else '无法写入恢复标记'
+        elif state in ('active', 'activating', 'reloading'):
+            ok = statusmod.request_pause()
+            action = '暂停'
+            err = '' if ok else '无法写入挂起标记'
+        else:
+            ok, err = _systemctl('start')
+            action = '恢复'
         if not ok:
-            self._error('无法%s映射' % ('暂停' if action == 'stop' else '恢复'),
-                        err)
+            self._error('无法%s映射' % action, err)
             return
         GLib.timeout_add_seconds(1, self.refresh)
 
     def select_profile(self, name):
         if self._updating:
             return
+        statusmod.clear_control()
         cfg = cfgmod.load()
         if name not in (cfg.get('profile') or {}):
             self._error('配置不存在', name)
@@ -270,6 +294,7 @@ class Tray(object):
         GLib.timeout_add_seconds(2, self.refresh)
 
     def restart(self):
+        statusmod.clear_control()
         ok, err = _systemctl('restart')
         if not ok:
             self._error('重启失败', err)
@@ -281,6 +306,7 @@ class Tray(object):
         subprocess.Popen([script], start_new_session=True)
 
     def quit_all(self):
+        statusmod.clear_control()
         ok, err = _systemctl('stop')
         if not ok:
             self._error('无法停止映射，未退出', err)

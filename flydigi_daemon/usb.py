@@ -258,7 +258,10 @@ class Pad(object):
         return (userctx, status, data)
 
     def discard(self, uid):
-        entry = self.pending.pop(uid, None)
+        # 只取消，不从 pending 里删。内核可能已经排队了完成事件，
+        # 如果这时释放 CUrb/缓冲区，内核稍后写完成数据就会 use-after-free。
+        # 统一由 reap() 收到完成后再 pop。
+        entry = self.pending.get(uid)
         if entry is None:
             return
         u, _ = entry
