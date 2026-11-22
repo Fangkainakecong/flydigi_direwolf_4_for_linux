@@ -54,13 +54,30 @@ EOF
             >/dev/null 2>&1 || true
     fi
     if ! pgrep -f '^/usr/bin/python3 -m flydigi_daemon tray$' >/dev/null 2>&1; then
-        nohup "$ROOT/scripts/flydigi_tray.sh" >/dev/null 2>&1 &
-        sleep 0.6
+        # 优先用 systemd --user 启动，让托盘属于图形会话；从远程终端
+        # nohup 启动时 polkit 会把进程当远程会话，暂停/重启会被拒绝。
+        started=0
+        if command -v systemd-run >/dev/null 2>&1; then
+            systemctl --user reset-failed flydigi-tray.service \
+                >/dev/null 2>&1 || true
+            if systemd-run --user --collect --unit=flydigi-tray \
+                --setenv=DISPLAY="${DISPLAY:-:0.0}" \
+                --setenv=XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
+                "$ROOT/scripts/flydigi_tray.sh" >/dev/null 2>&1; then
+                started=1
+            fi
+        fi
+        if [ "$started" -eq 0 ]; then
+            nohup "$ROOT/scripts/flydigi_tray.sh" >/dev/null 2>&1 &
+        fi
+        sleep 0.8
     fi
     echo "已安装托盘自启动：$DESKTOP"
     echo "已安装桌面快捷方式：$CONTROL"
     ;;
   stop|remove)
+    systemctl --user stop flydigi-tray.service >/dev/null 2>&1 || true
+    systemctl --user reset-failed flydigi-tray.service >/dev/null 2>&1 || true
     pids=$(pgrep -f '^/usr/bin/python3 -m flydigi_daemon tray$' || true)
     if [ -n "$pids" ]; then
         kill $pids 2>/dev/null || true
