@@ -122,7 +122,7 @@ button.primary:disabled { opacity: .5; cursor: default; }
 <div class="topline">
   <div>
     <h1>飞智冰原狼4 · 映射编辑器</h1>
-    <div class="meta">保存到 <code>config/user.toml</code>，只写与默认配置不同的字段；保存后可以继续修改，关闭页面且没有未保存修改时编辑器自动退出。</div>
+    <div class="meta">保存到 <code>config/user.toml</code>，只写与默认配置不同的字段；保存成功后约 1 秒自动重启核心程序使配置生效。编辑器不会立即退出，可以接着改；关闭页面后退出（有未保存修改时会保留）。</div>
     <details class="help">
       <summary>两个勾选是什么意思？</summary>
       <p><b>标准输入原样透传</b>：勾选时，ABXY、LB/RB、双摇杆、LT/RT、十字键、
@@ -778,7 +778,7 @@ document.getElementById('save').addEventListener('click', async () => {
     const data = await response.json();
     if (data.ok) {
       dirty = false;
-      setStatus('已保存到 ' + data.path + '；可以继续修改，关闭页面且未修改时编辑器自动退出。', 'ok');
+      setStatus('已保存到 ' + data.path + '；约 1 秒后自动重启核心程序使配置生效。编辑器继续运行，可以接着改；关闭页面后退出（有未保存修改时会保留）。', 'ok');
     } else {
       setStatus('保存失败：\n' + (data.errors || []).join('\n'), 'err');
     }

@@ -50,7 +50,7 @@ class _Sink(object):
 # 解析 / 校验
 # ---------------------------------------------------------------------------
 def test_parse_default_config():
-    cfg = config.load()
+    cfg = config.load(config.DEFAULT_PATH)
     errors, warnings = lint_config(cfg)
     assert errors == [], errors
     assert all('calibrate' in w for w in warnings), warnings

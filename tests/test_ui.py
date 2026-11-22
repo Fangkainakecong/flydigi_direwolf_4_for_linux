@@ -23,7 +23,7 @@ DEFAULT = config.load(config.DEFAULT_PATH)
 
 def test_model_has_buttons_and_axes():
     model = ui.build_model(DEFAULT)
-    assert model['editor'] == 7
+    assert model['editor'] == 8
     names = [p['name'] for p in model['profiles']]
     assert names[:4] == ['gamepad', 'desktop', 'media', 'passthrough']
     desktop = model['profiles'][1]
@@ -326,6 +326,7 @@ def _free_port():
 
 class _EditArgs(object):
     no_open = True
+    no_restart = True
     idle_timeout = 0
     page_close_grace = 20
     port = 0
@@ -370,6 +371,59 @@ def test_editor_save_keeps_running_until_page_close():
             assert not thread.is_alive(), '关闭页面后编辑器应退出'
         finally:
             ui.cfgmod.USER_PATH = old_user
+
+
+def test_editor_save_schedules_daemon_restart():
+    old_user = ui.cfgmod.USER_PATH
+    old_restart, old_delay = ui.restart_daemon, ui.RESTART_DELAY
+    calls = []
+
+    def fake_restart():
+        calls.append(1)
+        return True, ''
+
+    ui.restart_daemon = fake_restart
+    ui.RESTART_DELAY = 0.05
+    with tempfile.TemporaryDirectory() as tmp:
+        ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
+        args = _EditArgs()
+        args.port = _free_port()
+        args.no_restart = False
+        args.page_close_grace = 0.2
+        thread = threading.Thread(target=ui.run,
+                                  args=(config.load(config.DEFAULT_PATH), args),
+                                  daemon=True)
+        try:
+            thread.start()
+            conn = None
+            for _ in range(30):
+                try:
+                    conn = http.client.HTTPConnection('127.0.0.1', args.port,
+                                                      timeout=1)
+                    conn.request('GET', '/api/model')
+                    if conn.getresponse().status == 200:
+                        break
+                except OSError:
+                    time.sleep(0.1)
+            assert conn is not None
+            conn.request('POST', '/api/save', body=json.dumps(_posted()),
+                         headers={'Content-Type': 'application/json'})
+            payload = json.loads(conn.getresponse().read())
+            assert payload['ok'], payload
+            assert payload['restart_scheduled'] is True
+            time.sleep(0.4)
+            assert calls, '保存后没有调度核心程序重启'
+
+            conn = http.client.HTTPConnection('127.0.0.1', args.port,
+                                              timeout=1)
+            conn.request('POST', '/api/closed',
+                         body=json.dumps({'dirty': False}),
+                         headers={'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            thread.join(3)
+        finally:
+            ui.cfgmod.USER_PATH = old_user
+            ui.restart_daemon, ui.RESTART_DELAY = old_restart, old_delay
 
 
 def test_editor_idle_exits():

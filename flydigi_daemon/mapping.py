@@ -406,8 +406,8 @@ def lint_config(cfg):
                     and not (0 < rule.threshold < 1):
                 errors.append('[profile.%s.axis.%s] threshold 必须在 0..1'
                               % (name, rule.axis))
-            if rule.target.kind == 'wheel' and \
-                    rule.release_threshold > rule.threshold:
+            if (rule.target.kind == 'wheel' and rule.max_hz <= 0
+                    and rule.release_threshold > rule.threshold):
                 warnings.append('[profile.%s.axis.%s] release_threshold > '
                                 'threshold，迟滞方向反了'
                                 % (name, rule.axis))

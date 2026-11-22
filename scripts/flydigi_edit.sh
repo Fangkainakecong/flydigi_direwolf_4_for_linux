@@ -24,7 +24,7 @@ open_url() {
 
 model=$(curl -fsS --max-time 1 "${URL}api/model" 2>/dev/null || true)
 case "$model" in
-  *'"editor": 7'*|*'"editor":7'*)
+  *'"editor": 8'*|*'"editor":8'*)
     open_url
     exit 0
     ;;

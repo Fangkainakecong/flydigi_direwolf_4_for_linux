@@ -9,5 +9,6 @@ windows-dump/
 
 # 个人配置覆盖层
 config/user.toml
+config/user.toml.bak
 config/mappings.html
 config/requested_profile

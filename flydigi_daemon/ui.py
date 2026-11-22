@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -154,7 +155,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 7, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 8, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -398,15 +399,62 @@ def render_page(model):
         return f.read().replace('__MODEL__', payload)
 
 
+RESTART_DELAY = 1.0
+DAEMON_SERVICE = 'flydigi-dw4.service'
+
+
+def restart_daemon():
+    """保存后重启核心程序；不弹密码框。返回 (ok, 错误文本)。"""
+    systemctl = shutil.which('systemctl') or '/usr/bin/systemctl'
+    sudo = shutil.which('sudo')
+    cmds = []
+    if sudo:
+        cmds.append([sudo, '-n', systemctl, 'restart', DAEMON_SERVICE])
+    cmds.append([systemctl, '--no-ask-password', 'restart', DAEMON_SERVICE])
+    errors = []
+    for cmd in cmds:
+        try:
+            proc = subprocess.run(cmd, check=False, capture_output=True,
+                                  text=True)
+        except OSError as exc:
+            errors.append(repr(exc))
+            continue
+        if proc.returncode == 0:
+            return True, ''
+        errors.append((proc.stderr or '').strip())
+    return False, '\n'.join(e for e in errors if e) or 'systemctl 执行失败'
+
+
 class EditorServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, auto_restart=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_request = time.time()
         self.page_closed = None
         self.page_dirty = False
+        self.auto_restart = bool(auto_restart)
+        self.restart_timer = None
+        self.restart_lock = threading.Lock()
+
+    def schedule_restart(self):
+        if not self.auto_restart:
+            return
+        with self.restart_lock:
+            if self.restart_timer is not None:
+                self.restart_timer.cancel()
+            self.restart_timer = threading.Timer(RESTART_DELAY,
+                                                 self._do_restart)
+            self.restart_timer.daemon = True
+            self.restart_timer.start()
+
+    def _do_restart(self):
+        ok, err = restart_daemon()
+        if ok:
+            print('配置已保存，核心程序已重启')
+        else:
+            print('⚠ 配置已保存，但核心程序重启失败：%s' % err)
 
 
 def make_handler(model, cfg):
@@ -487,8 +535,13 @@ def make_handler(model, cfg):
                     state['model'] = build_model(state['cfg'])
                 except Exception:               # noqa: BLE001
                     pass
+                schedule = getattr(self.server, 'schedule_restart', None)
+                if schedule is not None:
+                    schedule()
             payload = {'ok': ok, 'errors': errors,
-                       'path': cfgmod.USER_PATH}
+                       'path': cfgmod.USER_PATH,
+                       'restart_scheduled': bool(
+                           ok and getattr(self.server, 'auto_restart', False))}
             self._send(200 if ok else 400, json.dumps(payload),
                        'application/json')
 
@@ -500,7 +553,9 @@ def run(cfg, args):
     url = 'http://127.0.0.1:%d/' % args.port
     try:
         server = EditorServer(('127.0.0.1', args.port),
-                              make_handler(model, cfg))
+                              make_handler(model, cfg),
+                              auto_restart=not getattr(args, 'no_restart',
+                                                       False))
     except OSError as exc:
         # 快捷方式重复点击时端口已占用：如果占用者就是本编辑器，直接开页面。
         try:
@@ -520,7 +575,7 @@ def run(cfg, args):
         return 1
     print('可视化编辑器: %s' % url)
     print('保存到: %s' % cfgmod.USER_PATH)
-    print('保存后编辑器继续运行；关闭页面后自动退出（Ctrl-C 停止）')
+    print('保存后 1 秒自动重启核心程序；编辑器继续运行，关闭页面后退出')
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
 
