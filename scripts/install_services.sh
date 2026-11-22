@@ -35,10 +35,14 @@ polkit.addRule(function(action, subject) {
 });
 EOF
   chmod 644 "$POLKIT_RULE"
+  # polkitd 启动时如果 rules.d 还不存在，不一定会自动监视新建目录；
+  # 重启一次确保规则立即生效。
+  systemctl restart polkit 2>/dev/null || true
 }
 
 remove_polkit() {
   rm -f "$POLKIT_RULE"
+  systemctl restart polkit 2>/dev/null || true
 }
 
 case "$MODE" in

@@ -5,8 +5,18 @@
 <style>
 :root { color-scheme: dark; }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 22px 28px 80px; background: #12151c; color: #dce3ee;
+html { background: #12151c; }
+body { margin: 0; padding: 22px 28px 80px; background: transparent; color: #dce3ee;
        font: 14px/1.5 -apple-system, "Segoe UI", "Noto Sans CJK SC", sans-serif; }
+.fx-layer { position: fixed; inset: 0; z-index: 0; overflow: hidden;
+            pointer-events: none; }
+.fx-layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#fx-bg { opacity: .95; }
+.page { position: relative; z-index: 2; }
+#fx-snow, #fx-trail { position: fixed; inset: 0; width: 100%; height: 100%;
+                      pointer-events: none; }
+#fx-snow { z-index: 3; opacity: .8; }
+#fx-trail { z-index: 4; }
 .topline { display: flex; justify-content: space-between; align-items: flex-start;
            gap: 20px; }
 h1 { font-size: 20px; margin: 0 0 4px; }
@@ -89,9 +99,9 @@ button.primary { background: #2b6cb0; color: #fff; border: 0;
                  border-radius: 8px; padding: 9px 18px; cursor: pointer;
                  font-size: 14px; }
 button.primary:disabled { opacity: .5; cursor: default; }
-.savebar { position: fixed; left: 0; right: 0; bottom: 0; background: #171d27;
-           border-top: 1px solid #273043; padding: 10px 28px;
-           display: flex; gap: 16px; align-items: center; }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+           background: #171d27; border-top: 1px solid #273043;
+           padding: 10px 28px; display: flex; gap: 16px; align-items: center; }
 #status { font-size: 13px; color: #8b97ab; }
 #status.ok { color: #6ee7a8; }
 #status.err { color: #ff8f8f; white-space: pre-wrap; }
@@ -105,6 +115,10 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .capture-box small { display: block; color: #8b97ab; margin: 8px 0 14px; }
 </style></head>
 <body>
+<div class="fx-layer" aria-hidden="true">
+  <canvas id="fx-bg"></canvas>
+</div>
+<div class="page">
 <div class="topline">
   <div>
     <h1>飞智冰原狼4 · 映射编辑器</h1>
@@ -167,6 +181,10 @@ button.primary:disabled { opacity: .5; cursor: default; }
           （daemon 未接管，或当前配置是透传）。点击框外或“取消”退出。</small>
     <button class="small" id="capture-cancel">取消</button>
   </div>
+</div>
+
+<canvas id="fx-snow" aria-hidden="true"></canvas>
+<canvas id="fx-trail" aria-hidden="true"></canvas>
 </div>
 
 <script>
@@ -753,5 +771,339 @@ document.getElementById('save').addEventListener('click', async () => {
 
 refreshStatus();
 setInterval(refreshStatus, 30000);
+
+/* ---------- 视觉特效：粒子背景 / 下雪 / 鼠标拖尾 ----------
+   参考博客园的雪景、鼠标拖尾和粒子背景的“感觉”，没有复制它的实现。
+   背景仍使用编辑器原来的深色 #12151c 系配色。 */
+(() => {
+  const bgCanvas = document.getElementById('fx-bg');
+  const snowCanvas = document.getElementById('fx-snow');
+  const trailCanvas = document.getElementById('fx-trail');
+  if (!bgCanvas || !snowCanvas || !trailCanvas) return;
+
+  const bgCtx = bgCanvas.getContext('2d');
+  const snowCtx = snowCanvas.getContext('2d');
+  const trailCtx = trailCanvas.getContext('2d');
+  const reduceMotion = window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const NODE_COLORS = ['158,197,255', '110,231,168', '77,156,255'];
+  const SPARK_COLORS = ['#4d9cff', '#6ee7a8', '#9ec5ff', '#e7f0ff'];
+  const pointer = {x: 0, y: 0, active: false};
+
+  let W = 1;
+  let H = 1;
+  let bgFill = null;
+  let nodes = [];
+  let flakes = [];
+  let trail = [];
+  let sparks = [];
+  let lastTrailSpawn = 0;
+
+  function makeNodes() {
+    const count = Math.max(34, Math.min(96, Math.round(W * H / 24000)));
+    nodes = [];
+    for (let i = 0; i < count; i += 1) {
+      nodes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 16,
+        vy: (Math.random() - 0.5) * 16,
+        r: 0.7 + Math.random() * 1.6,
+        c: i % NODE_COLORS.length,
+      });
+    }
+  }
+
+  function makeSnow() {
+    const count = Math.max(36, Math.min(140, Math.round(W * H / 14000)));
+    flakes = [];
+    for (let i = 0; i < count; i += 1) {
+      const big = Math.random() < 0.12;
+      flakes.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: big ? 2.6 + Math.random() * 3.2 : 0.7 + Math.random() * 1.9,
+        v: 14 + Math.random() * 42,
+        drift: 5 + Math.random() * 18,
+        ph: Math.random() * Math.PI * 2,
+        a: 0.18 + Math.random() * 0.45,
+        rot: Math.random() * Math.PI,
+        spin: (Math.random() - 0.5) * 0.8,
+        big,
+      });
+    }
+  }
+
+  function resize() {
+    W = Math.max(1, window.innerWidth);
+    H = Math.max(1, window.innerHeight);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    [bgCanvas, snowCanvas, trailCanvas].forEach(canvas => {
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+    });
+    [bgCtx, snowCtx, trailCtx].forEach(ctx => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+    // 背景底色保持编辑器原来的 #12151c，不改成别的色系。
+    bgFill = '#12151c';
+    makeNodes();
+    makeSnow();
+    const now = performance.now();
+    drawBackground(now, 0);
+    drawSnow(now, 0);
+    drawTrail(now, 0);
+  }
+
+  function drawBackground(now, dt) {
+    bgCtx.clearRect(0, 0, W, H);
+    bgCtx.fillStyle = bgFill;
+    bgCtx.fillRect(0, 0, W, H);
+
+    nodes.forEach(node => {
+      node.x += node.vx * dt;
+      node.y += node.vy * dt;
+      if (node.x < -20) node.x = W + 20;
+      if (node.x > W + 20) node.x = -20;
+      if (node.y < -20) node.y = H + 20;
+      if (node.y > H + 20) node.y = -20;
+    });
+
+    const maxD = 132;
+    const maxD2 = maxD * maxD;
+    for (let i = 0; i < nodes.length; i += 1) {
+      const a = nodes[i];
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const b = nodes[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < maxD2) {
+          const alpha = (1 - Math.sqrt(d2) / maxD) * 0.17;
+          bgCtx.strokeStyle = 'rgba(120,170,255,' + alpha + ')';
+          bgCtx.lineWidth = 0.6;
+          bgCtx.beginPath();
+          bgCtx.moveTo(a.x, a.y);
+          bgCtx.lineTo(b.x, b.y);
+          bgCtx.stroke();
+        }
+      }
+    }
+
+    if (pointer.active) {
+      const mouseD = 190;
+      const mouseD2 = mouseD * mouseD;
+      nodes.forEach(node => {
+        const dx = node.x - pointer.x;
+        const dy = node.y - pointer.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < mouseD2) {
+          const alpha = (1 - Math.sqrt(d2) / mouseD) * 0.28;
+          bgCtx.strokeStyle = 'rgba(110,231,168,' + alpha + ')';
+          bgCtx.lineWidth = 0.7;
+          bgCtx.beginPath();
+          bgCtx.moveTo(pointer.x, pointer.y);
+          bgCtx.lineTo(node.x, node.y);
+          bgCtx.stroke();
+        }
+      });
+      const glow = bgCtx.createRadialGradient(
+        pointer.x, pointer.y, 0, pointer.x, pointer.y, 150);
+      glow.addColorStop(0, 'rgba(77,156,255,.10)');
+      glow.addColorStop(1, 'rgba(77,156,255,0)');
+      bgCtx.fillStyle = glow;
+      bgCtx.beginPath();
+      bgCtx.arc(pointer.x, pointer.y, 150, 0, Math.PI * 2);
+      bgCtx.fill();
+    }
+
+    nodes.forEach(node => {
+      bgCtx.fillStyle = 'rgba(' + NODE_COLORS[node.c] + ',.62)';
+      bgCtx.beginPath();
+      bgCtx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      bgCtx.fill();
+    });
+  }
+
+  function drawSnow(now, dt) {
+    snowCtx.clearRect(0, 0, W, H);
+    const mouseD = 112;
+    const mouseD2 = mouseD * mouseD;
+    flakes.forEach(flake => {
+      flake.y += flake.v * dt;
+      flake.x += Math.sin(now * 0.0007 + flake.ph) * flake.drift * dt;
+      flake.rot += flake.spin * dt;
+      if (pointer.active) {
+        const dx = flake.x - pointer.x;
+        const dy = flake.y - pointer.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < mouseD2 && d2 > 1) {
+          const d = Math.sqrt(d2);
+          const push = (1 - d / mouseD) * 34 * dt;
+          flake.x += dx / d * push;
+          flake.y += dy / d * push;
+        }
+      }
+      if (flake.y > H + 12) {
+        flake.y = -12;
+        flake.x = Math.random() * W;
+      }
+      if (flake.x < -16) flake.x = W + 16;
+      if (flake.x > W + 16) flake.x = -16;
+
+      const alpha = flake.a * (0.72 + 0.28 * Math.sin(now * 0.0012 + flake.ph));
+      snowCtx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      if (flake.big) {
+        snowCtx.save();
+        snowCtx.translate(flake.x, flake.y);
+        snowCtx.rotate(flake.rot);
+        snowCtx.strokeStyle = 'rgba(231,240,255,.9)';
+        snowCtx.lineWidth = Math.max(0.6, flake.r * 0.2);
+        for (let i = 0; i < 6; i += 1) {
+          snowCtx.rotate(Math.PI / 3);
+          snowCtx.beginPath();
+          snowCtx.moveTo(0, 0);
+          snowCtx.lineTo(0, -flake.r * 1.8);
+          snowCtx.stroke();
+        }
+        snowCtx.restore();
+      } else {
+        snowCtx.fillStyle = '#e7f0ff';
+        snowCtx.beginPath();
+        snowCtx.arc(flake.x, flake.y, flake.r, 0, Math.PI * 2);
+        snowCtx.fill();
+      }
+    });
+    snowCtx.globalAlpha = 1;
+  }
+
+  function addSpark(x, y, power) {
+    if (sparks.length > 90) return;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (12 + Math.random() * 46) * power;
+    sparks.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 10,
+      life: 0.55 + Math.random() * 0.45,
+      decay: 0.9 + Math.random() * 1.2,
+      r: 0.8 + Math.random() * 2.2,
+      c: SPARK_COLORS[(Math.random() * SPARK_COLORS.length) | 0],
+    });
+  }
+
+  function drawTrail(now, dt) {
+    trailCtx.clearRect(0, 0, W, H);
+    while (trail.length && now - trail[0].t > 520) trail.shift();
+
+    if (trail.length > 1) {
+      trailCtx.save();
+      trailCtx.globalCompositeOperation = 'lighter';
+      trailCtx.lineCap = 'round';
+      trailCtx.lineJoin = 'round';
+      for (let i = 1; i < trail.length; i += 1) {
+        const p0 = trail[i - 1];
+        const p1 = trail[i];
+        const age = Math.max(0, 1 - (now - p1.t) / 520);
+        if (age <= 0) continue;
+        trailCtx.strokeStyle = 'rgba(77,156,255,' + (age * 0.42) + ')';
+        trailCtx.lineWidth = 1 + age * 5;
+        trailCtx.beginPath();
+        trailCtx.moveTo(p0.x, p0.y);
+        trailCtx.lineTo(p1.x, p1.y);
+        trailCtx.stroke();
+        trailCtx.strokeStyle = 'rgba(158,197,255,' + (age * 0.3) + ')';
+        trailCtx.lineWidth = 0.6 + age * 1.4;
+        trailCtx.beginPath();
+        trailCtx.moveTo(p0.x, p0.y);
+        trailCtx.lineTo(p1.x, p1.y);
+        trailCtx.stroke();
+      }
+      const head = trail[trail.length - 1];
+      const glow = trailCtx.createRadialGradient(
+        head.x, head.y, 0, head.x, head.y, 22);
+      glow.addColorStop(0, 'rgba(110,231,168,.16)');
+      glow.addColorStop(0.5, 'rgba(77,156,255,.08)');
+      glow.addColorStop(1, 'rgba(77,156,255,0)');
+      trailCtx.fillStyle = glow;
+      trailCtx.beginPath();
+      trailCtx.arc(head.x, head.y, 22, 0, Math.PI * 2);
+      trailCtx.fill();
+      trailCtx.restore();
+    }
+
+    for (let i = sparks.length - 1; i >= 0; i -= 1) {
+      const spark = sparks[i];
+      spark.life -= spark.decay * dt;
+      if (spark.life <= 0) {
+        sparks.splice(i, 1);
+        continue;
+      }
+      spark.vx *= Math.pow(0.2, dt);
+      spark.vy += 36 * dt;
+      spark.x += spark.vx * dt;
+      spark.y += spark.vy * dt;
+      trailCtx.globalAlpha = Math.max(0, Math.min(1, spark.life));
+      trailCtx.fillStyle = spark.c;
+      trailCtx.beginPath();
+      trailCtx.arc(spark.x, spark.y, spark.r * spark.life, 0, Math.PI * 2);
+      trailCtx.fill();
+    }
+    trailCtx.globalAlpha = 1;
+  }
+
+  window.addEventListener('pointermove', event => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.active = true;
+    if (reduceMotion) return;
+    const now = performance.now();
+    if (now - lastTrailSpawn < 14) return;
+    lastTrailSpawn = now;
+    trail.push({x: event.clientX, y: event.clientY, t: now});
+    if (trail.length > 42) trail.shift();
+    if (Math.random() < 0.45) addSpark(event.clientX, event.clientY, 0.45);
+  }, {passive: true});
+
+  window.addEventListener('pointerdown', event => {
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.active = true;
+    if (!reduceMotion) {
+      for (let i = 0; i < 12; i += 1) {
+        addSpark(event.clientX, event.clientY, 1.35);
+      }
+    }
+  }, {passive: true});
+
+  window.addEventListener('pointerleave', () => { pointer.active = false; });
+  window.addEventListener('blur', () => { pointer.active = false; });
+  window.addEventListener('resize', resize, {passive: true});
+  document.addEventListener('visibilitychange', () => {
+    last = performance.now();
+    lastBg = last;
+  });
+
+  let last = performance.now();
+  let lastBg = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    last = now;
+    if (!document.hidden) {
+      if (now - lastBg > 33) {
+        const bgDt = Math.min(0.1, (now - lastBg) / 1000);
+        drawBackground(now, bgDt);
+        lastBg = now;
+      }
+      drawSnow(now, dt);
+      drawTrail(now, dt);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  if (!reduceMotion) requestAnimationFrame(frame);
+})();
 </script>
 </body></html>

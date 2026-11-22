@@ -233,6 +233,10 @@ def test_render_page():
     assert 'desktop' in page
     assert '/api/refresh' not in page
     assert '点击刷新电量' not in page
+    assert 'id="fx-bg"' in page
+    assert 'id="fx-snow"' in page
+    assert 'id="fx-trail"' in page
+    assert 'prefers-reduced-motion' in page
     assert '保存到 user.toml' in page
 
 

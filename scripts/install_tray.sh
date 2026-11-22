@@ -1,5 +1,7 @@
 #!/bin/sh
-# 安装/移除托盘自启动（用户级，不需要 root）。
+# 启动/停止托盘（用户级，不需要 root）。
+#   start：安装自启动/桌面快捷方式，并立即启动托盘
+#   stop ：停止托盘，并移除自启动/桌面快捷方式
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -11,8 +13,8 @@ APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 CONTROL="$DESKTOP_DIR/flydigi-control.desktop"
 CONTROL_APP="$APP_DIR/flydigi-control.desktop"
 
-case "${1:-install}" in
-  install)
+case "${1:-start}" in
+  start|install)
     mkdir -p "$AUTOSTART" "$ICON_DIR" "$DESKTOP_DIR" "$APP_DIR"
     cat > "$DESKTOP" <<EOF
 [Desktop Entry]
@@ -51,16 +53,23 @@ EOF
             "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" \
             >/dev/null 2>&1 || true
     fi
+    if ! pgrep -f '^/usr/bin/python3 -m flydigi_daemon tray$' >/dev/null 2>&1; then
+        nohup "$ROOT/scripts/flydigi_tray.sh" >/dev/null 2>&1 &
+        sleep 0.6
+    fi
     echo "已安装托盘自启动：$DESKTOP"
     echo "已安装桌面快捷方式：$CONTROL"
-    echo "  现在启动：$ROOT/scripts/flydigi_tray.sh &"
     ;;
-  remove)
-    rm -f "$DESKTOP" "$CONTROL" "$CONTROL_APP"
-    echo "已移除托盘自启动/桌面快捷方式"
+  stop|remove)
+    pids=$(pgrep -f '^/usr/bin/python3 -m flydigi_daemon tray$' || true)
+    if [ -n "$pids" ]; then
+        kill $pids 2>/dev/null || true
+    fi
+    rm -f "$DESKTOP"
+    echo "已停止托盘并移除自启动；桌面快捷方式保留"
     ;;
   *)
-    echo "用法: $0 [install|remove]"
+    echo "用法: $0 [start|stop]"
     exit 1
     ;;
 esac

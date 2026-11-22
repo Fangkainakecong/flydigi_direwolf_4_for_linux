@@ -106,9 +106,9 @@ class Tray(object):
         self.config_item.show()
         self.menu.append(self.config_item)
         self._item('编辑配置', self.edit)
-        self._item('重启程序', self.restart)
         self._separator()
-        self._item('退出（停止映射并退出）', self.quit_all)
+        self._item('重启程序', self.restart)
+        self._item('退出', self.quit_all)
         self.ind.set_menu(self.menu)
 
         self.profile_items = {}
@@ -194,7 +194,7 @@ class Tray(object):
                 self.battery_item.set_label('电量: —')
             else:
                 self.battery_item.set_label(
-                    '电量: %d%%（%s/5，%s）'
+                    '电量: %d%%（档位 %s/5，固件 %s）'
                     % (pct, info.get('battery'), info.get('fw') or '?'))
         else:
             self.profile_item.set_label('配置: —')

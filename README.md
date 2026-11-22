@@ -78,7 +78,7 @@ sudo scripts/install_services.sh
 python3 -m flydigi_daemon devices
 
 # 5. 托盘 + 桌面快捷方式（可选，用户级）
-scripts/install_tray.sh install
+scripts/install_tray.sh start
 ```
 
 配置默认在 `config/default.toml`；个人改动写到 `config/user.toml`
@@ -143,7 +143,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── flydigi_edit.sh               # 编辑器启动脚本（快捷方式 Exec）
 │   ├── flydigi_tray.sh               # 托盘启动脚本（日志写 /tmp）
 │   ├── flydigi_control.sh            # 桌面快捷方式：托盘 + 编辑器
-│   ├── install_tray.sh               # 安装/移除托盘自启动/桌面快捷方式
+│   ├── install_tray.sh               # start/stop 托盘（自启动/桌面快捷方式）
 │   └── install_services.sh           # 安装/切换 daemon-only 或 watch 模式
 ├── systemd/
 │   ├── flydigi-dw4.service.in        # daemon unit 模板（@ROOT@ 替换）
@@ -448,6 +448,8 @@ python3 -m flydigi_daemon edit
 - 扳机滚轮：`deadzone` / `max_hz` / `curve`（比例）或 `threshold` / `repeat_hz`（固定）
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
+- 视觉效果：深色粒子背景、下雪、鼠标拖尾和点击火花；保留原来的
+  `#12151c` 深色配色，并遵守系统 `prefers-reduced-motion`
 
 右上角有一个小电池图标：只显示 daemon 用 cmd16 读到的电量（0..5 档换算成
 百分比）和固件版本，不可点击。daemon **每 15 分钟**非阻塞刷新一次；手柄从
@@ -516,11 +518,11 @@ udev 只匹配 `Flydigi Direwolf 4`，不会因为黑武士2 插拔而启动 dae
 
 `python3 -m flydigi_daemon tray` 会启动一个 AppIndicator。当前也已写入
 `~/.config/autostart/flydigi-tray.desktop`，登录后自动出现；桌面快捷方式
-`flydigi-control.desktop` 会确保托盘在运行，然后打开配置编辑器。重装/移除：
+`flydigi-control.desktop` 会确保托盘在运行，然后打开配置编辑器。启动/停止：
 
 ```bash
-scripts/install_tray.sh install   # 托盘自启动 + 桌面快捷方式
-scripts/install_tray.sh remove
+scripts/install_tray.sh start   # 托盘自启动 + 桌面快捷方式 + 立即启动
+scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式保留）
 ```
 
 菜单：
@@ -537,7 +539,7 @@ scripts/install_tray.sh remove
 两个服务。没安装规则时，托盘会回退到 `pkexec` 弹一次管理员授权框。
 当前 Python/GTK 托盘实测 **RSS ≈ 49 MB，PSS ≈ 25 MB**（大部分是 GTK 共享库，
 不是 daemon 变胖；daemon 本身仍约 12 MB）。优先省内存可以用
-`scripts/install_tray.sh remove` 关掉自启动，只在需要时从桌面快捷方式打开。
+`scripts/install_tray.sh stop` 关掉托盘和自启动，需要时从桌面快捷方式再打开。
 
 进程名方面，启动时会用 `prctl(PR_SET_NAME)` 把 `comm` 改成
 `flydigi-dw4` / `flydigi-tray`，`ps -o comm` 和任务管理器里不再是
