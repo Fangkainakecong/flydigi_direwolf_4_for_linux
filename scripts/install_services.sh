@@ -99,13 +99,12 @@ case "$MODE" in
     ;;
 
   ""|--daemon|install)
-    # daemon-only 模式不安装 watch unit；如果以前装过，顺手清掉。
-    systemctl disable --now "$WATCH" 2>/dev/null || true
-    systemctl reset-failed "$WATCH" 2>/dev/null || true
-    rm -f "$SYSTEMD/$WATCH"
+    # watch 代码/unit 保留，但默认不启用、不自动启动；只有主程序开机自启。
     sed "s|@ROOT@|$ROOT|g" "$ROOT/systemd/flydigi-dw4.service.in" \
       > "$SYSTEMD/$DAEMON"
-    chmod 644 "$SYSTEMD/$DAEMON"
+    sed "s|@ROOT@|$ROOT|g" "$ROOT/systemd/flydigi-watch.service.in" \
+      > "$SYSTEMD/$WATCH"
+    chmod 644 "$SYSTEMD/$DAEMON" "$SYSTEMD/$WATCH"
     install -m 644 "$ROOT/udev/$RULE" "$UDEV/$RULE"
     systemctl daemon-reload
     udevadm control --reload-rules 2>/dev/null || true
@@ -113,11 +112,13 @@ case "$MODE" in
     systemctl reset-failed "$DAEMON" 2>/dev/null || true
     install_polkit
     install_sudoers
+    # 只 enable 主程序；watch 保留 unit 但明确 disable。
+    systemctl disable --now "$WATCH" 2>/dev/null || true
     systemctl enable --now "$DAEMON"
     systemctl restart "$DAEMON"
-    echo "已启用 daemon-only 模式：$DAEMON 开机自启；watch 未安装"
+    echo "已启用 daemon-only 模式：只有 $DAEMON 开机自启"
+    echo "  watch 保留但未启用（不会自动启动）：systemctl start $WATCH 可手动启动"
     echo "  日志: journalctl -u $DAEMON -f"
-    echo "  需要 watch 时: sudo $0 --watch"
     exit 0
     ;;
 
