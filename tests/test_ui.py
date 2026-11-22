@@ -216,23 +216,14 @@ def test_status_roundtrip():
         path = os.path.join(tmp, 'status.json')
         cfg['daemon']['status_file'] = path
         status.write(cfg, {'battery': 5, 'connect': 0, 'slot': 3,
-                           'fw': '4.0.7.2', 'uid': 'x'})
+                           'fw': '4.0.7.2', 'uid': 'x'},
+                     profile='media', profile_slot=3)
         data = status.read(cfg)
         assert data['battery'] == 5
         assert data['battery_percent'] == 100
+        assert data['profile'] == 'media'
+        assert data['profile_slot'] == 3
         assert oct(os.stat(path).st_mode & 0o777) == '0o644'
-
-
-def test_status_refresh_file():
-    old = status.REFRESH_FILE
-    with tempfile.TemporaryDirectory() as tmp:
-        status.REFRESH_FILE = os.path.join(tmp, 'refresh')
-        try:
-            assert status.refresh_mtime() == 0
-            status.request_refresh()
-            assert status.refresh_mtime() > 0
-        finally:
-            status.REFRESH_FILE = old
 
 
 def test_render_page():
@@ -240,6 +231,8 @@ def test_render_page():
     assert '__MODEL__' not in page
     assert 'const MODEL =' in page
     assert 'desktop' in page
+    assert '/api/refresh' not in page
+    assert '点击刷新电量' not in page
     assert '保存到 user.toml' in page
 
 

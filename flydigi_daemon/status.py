@@ -13,7 +13,7 @@ import tempfile
 import time
 
 
-def write(cfg, info):
+def write(cfg, info, profile=None, profile_slot=None):
     from . import config as cfgmod
     path = cfgmod.status_file(cfg)
     data = {
@@ -27,6 +27,10 @@ def write(cfg, info):
         'updated': time.time(),
         'updated_text': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
+    if profile is not None:
+        data['profile'] = profile
+    if profile_slot is not None:
+        data['profile_slot'] = profile_slot
     try:
         folder = os.path.dirname(os.path.abspath(path))
         if folder:
@@ -40,25 +44,6 @@ def write(cfg, info):
         return data
     except OSError:
         return None
-
-
-REFRESH_FILE = '/tmp/flydigi-battery-refresh'
-
-
-def request_refresh():
-    """网页点“刷新电量”时写一个时间戳；daemon 轮询它。"""
-    try:
-        with open(REFRESH_FILE, 'w', encoding='utf-8') as f:
-            f.write(str(time.time()))
-    except OSError:
-        pass
-
-
-def refresh_mtime():
-    try:
-        return os.stat(REFRESH_FILE).st_mtime
-    except OSError:
-        return 0.0
 
 
 def read(cfg):

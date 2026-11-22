@@ -157,6 +157,18 @@ def test_state_file_roundtrip():
         assert again.slot == 3 and again.profile == 'passthrough'
 
 
+def test_select_by_name_persists():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'state.json')
+        ctrl, _ = make(state_path=path)
+        assert ctrl.profile == 'gamepad'
+        assert ctrl.select('media')
+        assert ctrl.profile == 'media'
+        again, _ = make(state_path=path)
+        assert again.profile == 'media'
+        assert not again.select('not-a-profile')
+
+
 def test_state_file_corrupt_is_ignored():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'state.json')

@@ -34,7 +34,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
 | `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
 | 本地可视化编辑器、电量显示、保存后退出 | ✅ |
-| 状态栏托盘：暂停/恢复、重启、编辑、退出 | ✅ 当前已运行 |
+| 状态栏托盘：暂停/恢复、配置选择、编辑、重启、退出 | ✅ 当前已运行 |
 | systemd：daemon 开机自启 + udev 插拔；watch 可选 | ✅ |
 | 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
 
@@ -76,6 +76,9 @@ python3 -m flydigi_daemon edit
 # 4. 自动启停（已安装过可跳过）
 sudo scripts/install_services.sh
 python3 -m flydigi_daemon devices
+
+# 5. 托盘 + 桌面快捷方式（可选，用户级）
+scripts/install_tray.sh install
 ```
 
 配置默认在 `config/default.toml`；个人改动写到 `config/user.toml`
@@ -89,6 +92,7 @@ flydigi_direwolf_4_for_linux/
 ├── README.md                         # 本文件：介绍、命令、目录、技术栈、历史
 ├── flydigi-mapping.desktop           # 项目内快捷方式；桌面另有一份
 ├── flydigi-tray.desktop              # 托盘 launcher；~/.config/autostart 也有一份
+├── flydigi-control.desktop           # 桌面快捷方式：托盘 + 配置编辑器
 ├── assets/
 │   └── flydigi.svg                   # 托盘/快捷方式图标
 ├── flydigi_daemon/                   # 正式 daemon（M1 起）
@@ -103,7 +107,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── devices.py                    # uinput Xbox/键盘/鼠标、capability、差量写入
 │   ├── rumble.py                     # FF_RUMBLE 上传/播放 → 12 字节 rumble 包
 │   ├── calibrate.py                  # 体感标定（静置/3 圈/90°、常数/估算）
-│   ├── status.py                     # 电量/固件 status.json、网页刷新信号
+│   ├── status.py                     # 电量/固件/当前配置 status.json
 │   ├── watch.py                      # dongle/活动监测，启停 systemd daemon
 │   ├── config.py                     # default.toml + user.toml 深合并
 │   ├── check.py                      # 识别 + 当前板载槽 blob 审计
@@ -138,7 +142,8 @@ flydigi_direwolf_4_for_linux/
 │   ├── procon_keepalive.py           # Switch Pro 模式保活实验
 │   ├── flydigi_edit.sh               # 编辑器启动脚本（快捷方式 Exec）
 │   ├── flydigi_tray.sh               # 托盘启动脚本（日志写 /tmp）
-│   ├── install_tray.sh               # 安装/移除托盘自启动（用户级）
+│   ├── flydigi_control.sh            # 桌面快捷方式：托盘 + 编辑器
+│   ├── install_tray.sh               # 安装/移除托盘自启动/桌面快捷方式
 │   └── install_services.sh           # 安装/切换 daemon-only 或 watch 模式
 ├── systemd/
 │   ├── flydigi-dw4.service.in        # daemon unit 模板（@ROOT@ 替换）
@@ -151,6 +156,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── calibration.example.json      # 标定文件格式示例
 │   ├── user.toml                     # 本地个人配置（gitignore）
 │   ├── calibration.json              # 本地标定（gitignore）
+│   ├── requested_profile             # 托盘请求下次使用的配置（gitignore）
 │   └── mappings.html                 # show 生成的页面（gitignore）
 ├── tests/
 │   ├── test_m1.py                    # 报文→状态、capability
@@ -443,10 +449,10 @@ python3 -m flydigi_daemon edit
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
 
-右上角有一个小电池图标：显示 daemon 用 cmd16 读到的电量（0..5 档换算成
-百分比）和固件版本。daemon **每 15 分钟**非阻塞刷新一次；手柄从休眠唤醒时
-会立即刷新，**点电池图标**也可以立即请求刷新。电量来自
-`/var/lib/flydigi/status.json`，`sudo python3 -m flydigi_daemon check` 也会写一次。
+右上角有一个小电池图标：只显示 daemon 用 cmd16 读到的电量（0..5 档换算成
+百分比）和固件版本，不可点击。daemon **每 15 分钟**非阻塞刷新一次；手柄从
+休眠唤醒/重新连接时会立即刷新。电量来自 `/var/lib/flydigi/status.json`，
+`sudo python3 -m flydigi_daemon check` 也会写一次。
 
 保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
 `.bak`），不会覆盖默认配置。改完重启 daemon 生效。
@@ -509,22 +515,29 @@ udev 只匹配 `Flydigi Direwolf 4`，不会因为黑武士2 插拔而启动 dae
 ## 状态栏托盘
 
 `python3 -m flydigi_daemon tray` 会启动一个 AppIndicator。当前也已写入
-`~/.config/autostart/flydigi-tray.desktop`，登录后自动出现；重装/移除可用
-`scripts/install_tray.sh install|remove`（用户级，不需要 root）。
+`~/.config/autostart/flydigi-tray.desktop`，登录后自动出现；桌面快捷方式
+`flydigi-control.desktop` 会确保托盘在运行，然后打开配置编辑器。重装/移除：
+
+```bash
+scripts/install_tray.sh install   # 托盘自启动 + 桌面快捷方式
+scripts/install_tray.sh remove
+```
 
 菜单：
 
-- 状态、当前配置/槽位、电量
+- 状态：daemon、当前配置/槽位、电量
 - 暂停映射 / 恢复映射（stop/start `flydigi-dw4`）
-- 重启 daemon
+- 配置选择：二级菜单列出全部 profile，点一下重启 daemon 并应用
 - 编辑配置（启动 `flydigi_edit.sh`）
-- 退出托盘（映射继续运行）
-- 停止映射并退出托盘
+- 重启程序
+- 退出（停止映射并退出）
 
-控制 systemd 需要 polkit 权限；`sudo scripts/install_services.sh` 会安装
-只允许当前用户管理 `flydigi-*` 两个服务的规则。当前 Python/GTK 托盘实测
-常驻内存约 **49 MB**；如果优先省内存，可以不启动它，或改用面板 launcher/
-更轻的原生托盘。
+控制 systemd 需要 polkit 权限；`sudo scripts/install_services.sh` 会创建
+`/etc/polkit-1/rules.d/50-flydigi.rules`，只允许当前用户管理 `flydigi-*`
+两个服务。没安装规则时，托盘会回退到 `pkexec` 弹一次管理员授权框。
+当前 Python/GTK 托盘实测 **RSS ≈ 49 MB，PSS ≈ 25 MB**（大部分是 GTK 共享库，
+不是 daemon 变胖；daemon 本身仍约 12 MB）。优先省内存可以用
+`scripts/install_tray.sh remove` 关掉自启动，只在需要时从桌面快捷方式打开。
 
 进程名方面，启动时会用 `prctl(PR_SET_NAME)` 把 `comm` 改成
 `flydigi-dw4` / `flydigi-tray`，`ps -o comm` 和任务管理器里不再是

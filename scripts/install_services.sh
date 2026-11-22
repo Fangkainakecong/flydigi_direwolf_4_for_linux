@@ -24,7 +24,7 @@ TARGET_USER=${SUDO_USER:-$(id -un)}
 MODE=${1:-}
 
 install_polkit() {
-  [ -d "$POLKIT_DIR" ] || return 0
+  mkdir -p "$POLKIT_DIR"
   cat > "$POLKIT_RULE" <<EOF
 polkit.addRule(function(action, subject) {
   if (action.id == "org.freedesktop.systemd1.manage-units" &&

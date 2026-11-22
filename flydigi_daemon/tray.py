@@ -1,4 +1,4 @@
-"""状态栏托盘（XFCE/AppIndicator）：暂停/恢复、重启、编辑配置、退出"""
+"""状态栏托盘（XFCE/AppIndicator）：状态、暂停、配置、编辑、重启、退出"""
 
 import fcntl
 import os
@@ -21,6 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICON_SRC = os.path.join(ROOT, 'assets', 'flydigi.svg')
 SERVICE = 'flydigi-dw4.service'
 LOCK_PATH = '/tmp/flydigi-tray.lock'
+INSTALL_HINT = '请先运行一次：sudo scripts/install_services.sh'
 
 
 def _ensure_icon():
@@ -42,16 +43,24 @@ def _ensure_icon():
 
 
 def _systemctl(action):
+    """返回 (ok, 错误文本)。没有 polkit 权限时尝试 pkexec 弹一次授权框。"""
     try:
         proc = subprocess.run(['systemctl', action, SERVICE],
                               check=False, capture_output=True, text=True)
+        err = (proc.stderr or '').strip()
+        if proc.returncode != 0 and 'Interactive authentication required' in err:
+            proc = subprocess.run(['pkexec', 'systemctl', action, SERVICE],
+                                  check=False, capture_output=True, text=True)
+            err = (proc.stderr or '').strip()
         if proc.returncode != 0:
-            print('systemctl %s 失败: %s'
-                  % (action, (proc.stderr or '').strip()), file=sys.stderr)
-        return proc
+            print('systemctl %s 失败: %s' % (action, err), file=sys.stderr)
+            if 'Interactive authentication required' in err:
+                err += '\n\n' + INSTALL_HINT
+            return False, err or ('systemctl 退出码 %d' % proc.returncode)
+        return True, ''
     except OSError as exc:
         print('systemctl %s 失败: %r' % (action, exc), file=sys.stderr)
-        return exc
+        return False, repr(exc)
 
 
 def _state():
@@ -73,6 +82,7 @@ class Tray(object):
         except OSError:
             raise SystemExit('flydigi-tray 已在运行')
 
+        self.cfg = cfgmod.load()
         icon = _ensure_icon()
         self.ind = appindicator.Indicator.new(
             'flydigi-tray', icon,
@@ -90,13 +100,21 @@ class Tray(object):
         self.battery_item = self._item('电量: —', None)
         self._separator()
         self.toggle_item = self._item('暂停映射', self.toggle)
-        self._item('重启 daemon', self.restart)
+        self.config_item = Gtk.MenuItem(label='配置选择')
+        self.profile_menu = Gtk.Menu()
+        self.config_item.set_submenu(self.profile_menu)
+        self.config_item.show()
+        self.menu.append(self.config_item)
         self._item('编辑配置', self.edit)
+        self._item('重启程序', self.restart)
         self._separator()
-        self._item('退出托盘（映射继续）', self.quit)
-        self._item('停止映射并退出', self.quit_all)
+        self._item('退出（停止映射并退出）', self.quit_all)
         self.ind.set_menu(self.menu)
 
+        self.profile_items = {}
+        self._profile_names = []
+        self._updating = False
+        self._rebuild_profiles(self.cfg)
         self.refresh()
         GLib.timeout_add_seconds(5, self.refresh)
 
@@ -115,6 +133,34 @@ class Tray(object):
         item.show()
         self.menu.append(item)
 
+    def _rebuild_profiles(self, cfg):
+        names = list(cfgmod.slot_profiles(cfg))
+        for name in (cfg.get('profile') or {}):
+            if name not in names:
+                names.append(name)
+        if names == self._profile_names:
+            return
+        self._profile_names = names
+        for child in self.profile_menu.get_children():
+            self.profile_menu.remove(child)
+        self.profile_items = {}
+        group = None
+        for name in names:
+            item = Gtk.RadioMenuItem.new_with_label_from_widget(group, name)
+            if group is None:
+                group = item
+            item.connect('activate',
+                         lambda _item, n=name: self.select_profile(n))
+            item.show()
+            self.profile_menu.append(item)
+            self.profile_items[name] = item
+        self.config_item.set_sensitive(bool(names))
+        if not names:
+            item = Gtk.MenuItem(label='（没有配置）')
+            item.set_sensitive(False)
+            item.show()
+            self.profile_menu.append(item)
+
     def refresh(self):
         state = _state()
         label = {'active': '运行中', 'inactive': '已停止',
@@ -128,13 +174,21 @@ class Tray(object):
             cfg = cfgmod.load()
             info = statusmod.read(cfg)
         except (SystemExit, Exception):     # noqa: BLE001
-            info = None
+            cfg, info = self.cfg, None
+        self._rebuild_profiles(cfg)
+
+        current = None
+        slot = None
         if info:
-            slot = info.get('slot')
-            profiles = cfgmod.slot_profiles(cfg)
-            name = profiles[slot - 1] if (isinstance(slot, int)
-                                          and 0 < slot <= len(profiles)) else '?'
-            self.profile_item.set_label('配置: %s（槽 %s）' % (name, slot))
+            current = info.get('profile')
+            slot = info.get('profile_slot', info.get('slot'))
+            if current not in self.profile_items:
+                profiles = cfgmod.slot_profiles(cfg)
+                if (isinstance(slot, int) and 0 < slot <= len(profiles)):
+                    current = profiles[slot - 1]
+            self.profile_item.set_label(
+                '配置: %s%s' % (current or '?',
+                               '（槽 %s）' % slot if slot else ''))
             pct = info.get('battery_percent')
             if pct is None:
                 self.battery_item.set_label('电量: —')
@@ -145,28 +199,80 @@ class Tray(object):
         else:
             self.profile_item.set_label('配置: —')
             self.battery_item.set_label('电量: —')
+
+        self._updating = True
+        try:
+            for name, item in self.profile_items.items():
+                item.set_active(name == current)
+        finally:
+            self._updating = False
         return True
+
+    def _error(self, title, detail=''):
+        dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.ERROR,
+                                   Gtk.ButtonsType.OK, title)
+        if detail:
+            dialog.format_secondary_text(detail)
+        dialog.run()
+        dialog.destroy()
 
     def toggle(self):
         state = _state()
         action = 'stop' if state in ('active', 'activating', 'reloading') \
             else 'start'
-        _systemctl(action)
-        self.refresh()
+        ok, err = _systemctl(action)
+        if not ok:
+            self._error('无法%s映射' % ('暂停' if action == 'stop' else '恢复'),
+                        err)
+            return
+        GLib.timeout_add_seconds(1, self.refresh)
+
+    def select_profile(self, name):
+        if self._updating:
+            return
+        cfg = cfgmod.load()
+        if name not in (cfg.get('profile') or {}):
+            self._error('配置不存在', name)
+            return
+        info = statusmod.read(cfg)
+        if info and info.get('profile') == name:
+            return
+        path = cfgmod.request_file(cfg)
+        try:
+            folder = os.path.dirname(path)
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(name + '\n')
+        except OSError as exc:
+            self._error('无法写入配置请求', repr(exc))
+            return
+        ok, err = _systemctl('restart')
+        if not ok:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            self._error('切换配置失败', err)
+            return
+        GLib.timeout_add_seconds(2, self.refresh)
 
     def restart(self):
-        _systemctl('restart')
-        self.refresh()
+        ok, err = _systemctl('restart')
+        if not ok:
+            self._error('重启失败', err)
+            return
+        GLib.timeout_add_seconds(2, self.refresh)
 
     def edit(self):
         script = os.path.join(ROOT, 'scripts', 'flydigi_edit.sh')
         subprocess.Popen([script], start_new_session=True)
 
-    def quit(self):
-        Gtk.main_quit()
-
     def quit_all(self):
-        _systemctl('stop')
+        ok, err = _systemctl('stop')
+        if not ok:
+            self._error('无法停止映射，未退出', err)
+            return
         Gtk.main_quit()
 
     def run(self):

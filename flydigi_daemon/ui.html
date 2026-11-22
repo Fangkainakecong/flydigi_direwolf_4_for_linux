@@ -21,7 +21,7 @@ h1 { font-size: 20px; margin: 0 0 4px; }
                      border-bottom: 1px solid #232c3b; vertical-align: top; }
 .help th { color: #b9c9df; font-weight: 500; }
 .battery { display: flex; align-items: center; gap: 7px; padding-top: 4px;
-           color: #9fb0c7; font-size: 12px; cursor: pointer; }
+           color: #9fb0c7; font-size: 12px; }
 .battery-body { width: 38px; height: 17px; border: 1.5px solid #6f7c93;
                 border-radius: 3px; padding: 2px; position: relative; }
 .battery-body::after { content: ""; position: absolute; right: -5px; top: 4px;
@@ -145,7 +145,7 @@ button.primary:disabled { opacity: .5; cursor: default; }
       </table>
     </details>
   </div>
-  <div class="battery unknown" id="battery" title="点击刷新电量">
+  <div class="battery unknown" id="battery" title="电量">
     <div class="battery-body"><div class="battery-fill" id="battery-fill"></div></div>
     <span id="battery-text">—</span>
   </div>
@@ -753,14 +753,5 @@ document.getElementById('save').addEventListener('click', async () => {
 
 refreshStatus();
 setInterval(refreshStatus, 30000);
-document.getElementById('battery').addEventListener('click', async () => {
-  setStatus('请求刷新电量…');
-  try {
-    await fetch('/api/refresh', {method: 'POST'});
-    setTimeout(refreshStatus, 1200);
-  } catch (err) {
-    setStatus('刷新请求失败：' + err, 'err');
-  }
-});
 </script>
 </body></html>

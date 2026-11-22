@@ -450,12 +450,6 @@ def make_handler(model, cfg):
                 self.server.page_dirty = dirty
                 self._send(204, '', 'text/plain')
                 return
-            if self.path == '/api/refresh':
-                statusmod.request_refresh()
-                self.server.last_request = time.time()
-                self._send(200, json.dumps({'ok': True}),
-                           'application/json')
-                return
             if self.path != '/api/save':
                 self._send(404, 'not found', 'text/plain')
                 return

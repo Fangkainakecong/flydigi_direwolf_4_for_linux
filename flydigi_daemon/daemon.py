@@ -10,6 +10,7 @@
 """
 
 import atexit
+import os
 import signal
 import struct
 import time
@@ -80,6 +81,21 @@ def _make_slots(cfg, persist=True, on_switch=None):
     )
 
 
+def _take_requested_profile(cfg):
+    """托盘切换配置时写的小文件；读一次就删，避免下次开机误用。"""
+    path = cfgmod.request_file(cfg)
+    try:
+        with open(path, encoding='utf-8') as f:
+            name = f.read().strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    return name or None
+
+
 def run_live(cfg, dry_run=False, seconds=None, profile=None,
              calibration=None):
     devcfg = cfgmod.device_section(cfg)
@@ -103,10 +119,12 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         print('解绑驱动: %s' % pad.takeover())
         link = usb.Link(pad)
         info = usb.identify_retry(link, tries=3)
+        last_info = {}
         if info:
             print('识别: 固件=%s uid=%s 当前槽位=%d'
                   % (info['fw'], info['uid'], info['slot']))
-            statusmod.write(cfg, info)
+            last_info.update(info)
+            statusmod.write(cfg, last_info)
         else:
             print('⚠ cmd16 无应答（不影响转发，但读不到槽位）')
 
@@ -124,11 +142,18 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
 
         t0 = time.time()
         profiles = mapping.parse_config(cfg)
+        requested = _take_requested_profile(cfg)
+        if requested and requested not in profiles:
+            print('⚠ 请求的配置 %r 不存在，忽略（可用：%s）'
+                  % (requested, ', '.join(sorted(profiles))))
+            requested = None
         ctrl = _make_slots(cfg)
+        if requested and not profile:
+            ctrl.select(requested)
         if ctrl.profile not in profiles:
             print('✗ state.json 里的 profile %r 不在配置里' % (ctrl.profile,))
             return 1
-        start_profile = profile or ctrl.profile
+        start_profile = profile or requested or ctrl.profile
         if start_profile not in profiles:
             print('✗ profile %r 不在配置里（可用：%s）'
                   % (start_profile, ', '.join(sorted(profiles))))
@@ -141,10 +166,16 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         feedback = (cfg.get('feedback', {}) or {}).get('profile_switch',
                                                         'short')
 
+        def profile_slot_of(name):
+            return (ctrl.profiles.index(name) + 1
+                    if name in ctrl.profiles else None)
+
         def on_switch(index, name, letter):
             if devs is not None:
                 devs.release_all()
             mapper.set_profile(profiles[name])
+            statusmod.write(cfg, last_info, profile=name,
+                            profile_slot=index + 1)
             print('%s 配置 → %d/%d %s（SELECT+%s）'
                   % (_fmt_elapsed(time.time() - t0), index + 1,
                      len(ctrl.profiles), name, letter.upper()))
@@ -152,6 +183,8 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
                 rumble.pulse(200, 120, 120)
 
         ctrl.on_switch = on_switch
+        statusmod.write(cfg, last_info, profile=mapper.profile.name,
+                        profile_slot=profile_slot_of(mapper.profile.name))
         print('当前配置: %s（槽 %d/%d）'
               % (start_profile, ctrl.slot + 1, len(ctrl.profiles)))
 
@@ -164,8 +197,6 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         battery_pending = False
         battery_sent = 0.0
         last_battery = time.time()
-        last_refresh = statusmod.refresh_mtime()
-        next_refresh_check = 0.0
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
@@ -179,13 +210,6 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             now = time.time()
             if rumble is not None:
                 rumble.poll(now)
-            if now >= next_refresh_check:
-                next_refresh_check = now + 0.5
-                refresh = statusmod.refresh_mtime()
-                if refresh != last_refresh:
-                    last_refresh = refresh
-                    last_battery = 0.0
-                    battery_pending = False
             if (battery_every > 0 and not battery_pending
                     and now - last_battery >= battery_every):
                 link.send_async(usb.legacy(usb.CMD_IDENTIFY))
@@ -250,7 +274,10 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             if rep.is_reply(data):
                 info = usb.info_from_reply(data)
                 if info:
-                    statusmod.write(cfg, info)
+                    last_info.update(info)
+                    statusmod.write(
+                        cfg, last_info, profile=mapper.profile.name,
+                        profile_slot=profile_slot_of(mapper.profile.name))
                     last_battery = time.time()
                     battery_pending = False
                 continue

@@ -201,3 +201,11 @@ class SlotController(object):
         self._save_state()
         if self.on_switch is not None:
             self.on_switch(index, self.profile, letter)
+
+    def select(self, name):
+        """按名字切槽并持久化；托盘重启 daemon 时用。"""
+        if name not in self.profiles:
+            return False
+        self.slot = self.profiles.index(name)
+        self._save_state()
+        return True

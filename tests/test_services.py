@@ -111,6 +111,20 @@ def test_idle_config_default_present():
     assert cfg['device']['product_hint'] == 'Direwolf 4'
 
 
+def test_requested_profile_file_is_consumed_once():
+    from flydigi_daemon import daemon
+    cfg = config.load()
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'requested_profile')
+        cfg['daemon']['request_file'] = path
+        assert config.request_file(cfg) == path
+        assert daemon._take_requested_profile(cfg) is None
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('desktop\n')
+        assert daemon._take_requested_profile(cfg) == 'desktop'
+        assert not os.path.exists(path)
+
+
 def test_procname_sets_comm():
     code = ('from flydigi_daemon.procname import set_name\n'
             'set_name("flydigi-test")\n'

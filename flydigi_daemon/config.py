@@ -74,6 +74,17 @@ def state_file(cfg):
     return os.path.expanduser(path) if path else default_state_path()
 
 
+def request_file(cfg):
+    """托盘写“下次启动用哪个配置”，daemon 启动时读取并删除。
+
+    放项目 `config/` 下，普通用户可写、root daemon 可读；比让托盘直接写
+    root 的 `/var/lib/flydigi/state.json` 简单，也不需要额外权限。
+    """
+    path = daemon_section(cfg).get('request_file') or 'config/requested_profile'
+    path = os.path.expanduser(str(path))
+    return path if os.path.isabs(path) else os.path.join(ROOT, path)
+
+
 def calibration_file(cfg):
     """`[calibration] file`，相对路径按仓库根目录解析。"""
     path = (cfg.get('calibration', {}).get('file')
