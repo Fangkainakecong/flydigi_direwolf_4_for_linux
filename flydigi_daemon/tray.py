@@ -193,9 +193,8 @@ class Tray(object):
             if pct is None:
                 self.battery_item.set_label('电量: —')
             else:
-                self.battery_item.set_label(
-                    '电量: %d%%（档位 %s/5，固件 %s）'
-                    % (pct, info.get('battery'), info.get('fw') or '?'))
+                stale = '（上次）' if info.get('battery_stale') else ''
+                self.battery_item.set_label('电量: %d%%%s' % (pct, stale))
         else:
             self.profile_item.set_label('配置: —')
             self.battery_item.set_label('电量: —')

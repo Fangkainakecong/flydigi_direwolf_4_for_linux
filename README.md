@@ -454,7 +454,8 @@ python3 -m flydigi_daemon edit
 右上角有一个小电池图标：只显示 daemon 用 cmd16 读到的电量（0..5 档换算成
 百分比）和固件版本，不可点击。daemon **每 15 分钟**非阻塞刷新一次；手柄从
 休眠唤醒/重新连接时会立即刷新。电量来自 `/var/lib/flydigi/status.json`，
-`sudo python3 -m flydigi_daemon check` 也会写一次。
+`sudo python3 -m flydigi_daemon check` 也会写一次。手柄休眠/关闭时 dongle
+可能回电量 0；这时不会显示成 0%，而是保留上一次非零值并标记“上次”。
 
 保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
 `.bak`），不会覆盖默认配置。改完重启 daemon 生效。
@@ -527,7 +528,7 @@ scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式�
 
 菜单：
 
-- 状态：daemon、当前配置/槽位、电量
+- 状态：daemon、当前配置/槽位、电量（休眠时显示上次值）
 - 暂停映射 / 恢复映射（stop/start `flydigi-dw4`）
 - 配置选择：二级菜单列出全部 profile，点一下重启 daemon 并应用
 - 编辑配置（启动 `flydigi_edit.sh`）

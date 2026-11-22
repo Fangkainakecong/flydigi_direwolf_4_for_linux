@@ -741,7 +741,9 @@ async function refreshStatus() {
     text.textContent = percent + '%';
     battery.className = 'battery' +
       (percent <= 20 ? ' critical' : percent <= 40 ? ' low' : '');
-    battery.title = '电量 ' + data.battery + '/5 · 固件 ' + (data.fw || '?') +
+    battery.title = '电量 ' + data.battery + '/5' +
+      (data.battery_stale ? ' · 上次读取' : '') +
+      ' · 固件 ' + (data.fw || '?') +
       ' · 读取于 ' + (data.updated_text || '?');
   } catch (err) {
     battery.className = 'battery unknown';

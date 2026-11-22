@@ -225,6 +225,21 @@ def test_status_roundtrip():
         assert data['profile_slot'] == 3
         assert oct(os.stat(path).st_mode & 0o777) == '0o644'
 
+        # 休眠时 dongle 常回 0；保留上一次非零值，不要显示成 0%。
+        status.write(cfg, {'battery': 0, 'connect': 0, 'slot': 3,
+                           'fw': '4.0.7.2', 'uid': 'x'})
+        data = status.read(cfg)
+        assert data['battery'] == 5
+        assert data['battery_percent'] == 100
+        assert data['battery_stale'] is True
+
+        status.write(cfg, {'battery': 3, 'connect': 0, 'slot': 3,
+                           'fw': '4.0.7.2', 'uid': 'x'})
+        data = status.read(cfg)
+        assert data['battery'] == 3
+        assert data['battery_percent'] == 60
+        assert data['battery_stale'] is False
+
 
 def test_render_page():
     page = ui.render_page(ui.build_model(config.load()))

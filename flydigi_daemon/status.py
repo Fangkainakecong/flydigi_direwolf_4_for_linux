@@ -16,21 +16,52 @@ import time
 def write(cfg, info, profile=None, profile_slot=None):
     from . import config as cfgmod
     path = cfgmod.status_file(cfg)
+    old = {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            old = json.load(f)
+        if not isinstance(old, dict):
+            old = {}
+    except (OSError, ValueError):
+        old = {}
+
+    # 手柄休眠/关闭时，dongle 的 cmd16 应答里电量常常是 0。0% 不是可信
+    # 读数（真正耗尽前一般已经关机），保留上一次非零值并标记为“上次”。
+    try:
+        level = int(info['battery']) if info.get('battery') is not None else None
+    except (TypeError, ValueError):
+        level = None
+    stale = False
+    if level is not None and level <= 0:
+        level = None
+    if level is None:
+        try:
+            last = int(old.get('battery'))
+        except (TypeError, ValueError):
+            last = 0
+        level = last if last > 0 else None
+        stale = True
+
     data = {
-        'battery': info.get('battery'),
-        'battery_percent': (min(int(info['battery']), 5) * 20
-                            if info.get('battery') is not None else None),
-        'connect': info.get('connect'),
-        'slot': info.get('slot'),
-        'fw': info.get('fw'),
-        'uid': info.get('uid'),
+        'battery': level,
+        'battery_percent': (min(level, 5) * 20
+                            if level is not None else None),
+        'battery_stale': stale,
+        'connect': info.get('connect', old.get('connect')),
+        'slot': info.get('slot', old.get('slot')),
+        'fw': info.get('fw', old.get('fw')),
+        'uid': info.get('uid', old.get('uid')),
         'updated': time.time(),
         'updated_text': time.strftime('%Y-%m-%d %H:%M:%S'),
     }
     if profile is not None:
         data['profile'] = profile
+    elif old.get('profile') is not None:
+        data['profile'] = old.get('profile')
     if profile_slot is not None:
         data['profile_slot'] = profile_slot
+    elif old.get('profile_slot') is not None:
+        data['profile_slot'] = old.get('profile_slot')
     try:
         folder = os.path.dirname(os.path.abspath(path))
         if folder:
