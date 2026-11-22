@@ -14,6 +14,7 @@
 
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -153,7 +154,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 6, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 7, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -235,8 +236,18 @@ def _profile_overrides(default_profiles, original, posted, existing, full):
         target = str(value.get('target', '')).strip()
         if not target:
             continue
-        clean = {field: value[field] for field in AXIS_FIELDS
-                 if field in value}
+        clean = {}
+        for field in AXIS_FIELDS:
+            if field not in value:
+                continue
+            item = value[field]
+            # 浏览器把非法数字 parseFloat 成 NaN，JSON 再变成 null；
+            # 这种字段直接跳过，回退到默认值，避免 "不支持的 TOML 值: None"。
+            if item is None:
+                continue
+            if isinstance(item, float) and not math.isfinite(item):
+                continue
+            clean[field] = item
         clean['target'] = target
         if full or dft is None:
             prof.setdefault('axis', {})[axis] = clean

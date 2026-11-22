@@ -22,8 +22,8 @@ DEFAULT = config.load(config.DEFAULT_PATH)
 
 
 def test_model_has_buttons_and_axes():
-    model = ui.build_model(config.load())
-    assert model['editor'] == 6
+    model = ui.build_model(DEFAULT)
+    assert model['editor'] == 7
     names = [p['name'] for p in model['profiles']]
     assert names[:4] == ['gamepad', 'desktop', 'media', 'passthrough']
     desktop = model['profiles'][1]
@@ -134,7 +134,7 @@ def test_save_overrides_and_diff():
 def test_rename_profile_full_copy():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
-        posted = model_posted(ui.build_model(config.load()))
+        posted = model_posted(ui.build_model(DEFAULT))
         posted['profiles']['desktop']['name'] = '桌面'
         ok, errors = ui.save_overrides(DEFAULT, posted, path)
         assert ok, errors
@@ -156,7 +156,7 @@ def test_rename_profile_full_copy():
 def test_rename_passthrough_profile():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
-        posted = model_posted(ui.build_model(config.load()))
+        posted = model_posted(ui.build_model(DEFAULT))
         posted['profiles']['gamepad']['name'] = '标准手柄'
         ok, errors = ui.save_overrides(DEFAULT, posted, path)
         assert ok, errors
@@ -169,7 +169,7 @@ def test_rename_passthrough_profile():
 def test_rename_can_turn_off_passthrough_and_groups():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
-        posted = model_posted(ui.build_model(config.load()))
+        posted = model_posted(ui.build_model(DEFAULT))
         posted['profiles']['gamepad']['name'] = '自定义手柄'
         posted['profiles']['gamepad']['passthrough'] = False
         posted['profiles']['desktop']['groups']['gyro'] = True
@@ -184,7 +184,7 @@ def test_rename_can_turn_off_passthrough_and_groups():
 def test_rename_duplicate_rejected():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
-        posted = model_posted(ui.build_model(config.load()))
+        posted = model_posted(ui.build_model(DEFAULT))
         posted['profiles']['desktop']['name'] = 'gamepad'
         ok, errors = ui.save_overrides(DEFAULT, posted, path)
         assert not ok
@@ -200,6 +200,18 @@ def test_keyboard_target_names():
         assert target.kind == 'key'
 
 
+def test_save_ignores_none_and_nan_axis_fields():
+    posted = _posted()
+    posted['profiles']['desktop']['axes']['rx'] = {
+        'target': 'wheel', 'max_hz': None, 'deadzone': float('nan')}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert ok, errors
+        data = tomli.load(open(path, 'rb'))
+        assert data['profile']['desktop']['axis']['rx']['target'] == 'wheel'
+
+
 def test_save_rejects_bad_target():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, 'user.toml')
@@ -213,7 +225,7 @@ def test_save_rejects_bad_target():
 
 def test_status_roundtrip():
     with tempfile.TemporaryDirectory() as tmp:
-        cfg = config.load()
+        cfg = config.load(config.DEFAULT_PATH)
         path = os.path.join(tmp, 'status.json')
         cfg['daemon']['status_file'] = path
         status.write(cfg, {'battery': 5, 'connect': 0, 'slot': 3,
@@ -243,7 +255,7 @@ def test_status_roundtrip():
 
 
 def test_render_page():
-    page = ui.render_page(ui.build_model(config.load()))
+    page = ui.render_page(ui.build_model(DEFAULT))
     assert '__MODEL__' not in page
     assert 'const MODEL =' in page
     assert 'desktop' in page
@@ -259,8 +271,8 @@ def test_render_page():
 
 
 def test_http_model_and_save():
-    model = ui.build_model(config.load())
-    cfg = config.load()
+    model = ui.build_model(DEFAULT)
+    cfg = config.load(config.DEFAULT_PATH)
     server = ui.ThreadingHTTPServer(('127.0.0.1', 0),
                                     ui.make_handler(model, cfg))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -327,7 +339,7 @@ def test_editor_save_keeps_running_until_page_close():
         args.port = _free_port()
         args.page_close_grace = 0.2
         thread = threading.Thread(target=ui.run,
-                                  args=(config.load(), args), daemon=True)
+                                  args=(config.load(config.DEFAULT_PATH), args), daemon=True)
         try:
             thread.start()
             conn = None
@@ -368,7 +380,7 @@ def test_editor_idle_exits():
         args.port = _free_port()
         args.idle_timeout = 0.2
         thread = threading.Thread(target=ui.run,
-                                  args=(config.load(), args), daemon=True)
+                                  args=(config.load(config.DEFAULT_PATH), args), daemon=True)
         try:
             thread.start()
             thread.join(4)
@@ -385,7 +397,7 @@ def test_editor_page_close_exits_when_clean():
         args.port = _free_port()
         args.page_close_grace = 0.2
         thread = threading.Thread(target=ui.run,
-                                  args=(config.load(), args), daemon=True)
+                                  args=(config.load(config.DEFAULT_PATH), args), daemon=True)
         try:
             thread.start()
             conn = None

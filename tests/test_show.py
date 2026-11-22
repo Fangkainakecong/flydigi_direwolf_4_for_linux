@@ -13,7 +13,7 @@ from flydigi_daemon import config, show    # noqa: E402
 
 
 def test_views_default():
-    views = show.build_views(config.load())
+    views = show.build_views(config.load(config.DEFAULT_PATH))
     assert [v.name for v in views] == ['gamepad', 'desktop', 'media',
                                        'passthrough']
     assert [v.slot for v in views] == [1, 2, 3, 4]
@@ -35,7 +35,7 @@ def test_views_default():
 
 
 def test_text_render():
-    views = show.build_views(config.load())
+    views = show.build_views(config.load(config.DEFAULT_PATH))
     text = show.render_text(views, 'config/default.toml', '未标定')
     assert 'desktop' in text and 'key:space' in text
     assert 'SELECT+B' in text
@@ -45,7 +45,7 @@ def test_text_render():
 
 
 def test_html_render_and_write():
-    views = show.build_views(config.load())
+    views = show.build_views(config.load(config.DEFAULT_PATH))
     page = show.render_html(views, 'config/default.toml',
                             calibration_label='未标定')
     assert page.startswith('<!doctype html>')

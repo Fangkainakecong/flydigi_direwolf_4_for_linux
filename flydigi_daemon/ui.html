@@ -696,7 +696,10 @@ function collect() {
         const field = input.dataset.field;
         if (input.type === 'checkbox') value[field] = input.checked;
         else if (input.type === 'text') value[field] = input.value.trim();
-        else if (input.value !== '') value[field] = parseFloat(input.value);
+        else if (input.value !== '') {
+          const number = parseFloat(input.value);
+          if (Number.isFinite(number)) value[field] = number;
+        }
       });
       axes[card.dataset.axis] = value;
     });
