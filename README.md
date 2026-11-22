@@ -261,9 +261,14 @@ python3 -m flydigi_daemon logs -f       # 持续跟随
 journalctl -u flydigi-watch -u flydigi-dw4 -f
 ```
 
-- daemon / watch → systemd journal
-- 编辑器 → `/tmp/flydigi-edit.log`（保存后自动退出）
-- 编辑器日志不会常驻；只有通过快捷方式启动过才会有
+- daemon / watch → systemd journal（自动写入；当前总 journal 约 64 MB）
+- 编辑器 → `/tmp/flydigi-edit.log`（保存后自动退出）；超过 256 KiB 轮转为
+  `.log.1`，最多约 512 KiB；`/tmp` 还会被系统按默认策略清理
+- 编辑器日志只在通过快捷方式启动时产生
+- journald 默认没有按时间删除的上限，只有磁盘比例上限。要收紧全局日志：
+  `sudo journalctl --vacuum-size=200M`、`sudo journalctl --vacuum-time=14d`，
+  或在 `/etc/systemd/journald.conf` 设 `SystemMaxUse=200M` /
+  `MaxRetentionSec=14day` 后重启 `systemd-journald`（影响所有系统日志）
 
 ## 故障排查：Ctrl/Shift 卡住、鼠标左右键错乱
 
