@@ -173,7 +173,21 @@ deadzone = 0.15
 max_hz = 30
 curve = 1.4
 
-# 右摇杆 → WASD（可选，默认注释）
+# 右摇杆 → 滚轮（可选，默认注释）
+# target = "wheel" 自动选方向：X 正负→右/左，Y 正负→上/下。
+# [profile.desktop.axis.rx]
+# target = "wheel"
+# deadzone = 0.2
+# max_hz = 24
+# curve = 1.4
+#
+# [profile.desktop.axis.ry]
+# target = "wheel"
+# deadzone = 0.2
+# max_hz = 24
+# curve = 1.4
+#
+# 右摇杆 → WASD（另一种用法）
 # [profile.desktop.axis.rx]
 # target = "keypair"
 # neg = "key:a"

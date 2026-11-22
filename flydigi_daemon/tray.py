@@ -20,8 +20,10 @@ from .procname import set_name
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICON_SRC = os.path.join(ROOT, 'assets', 'flydigi.svg')
 SERVICE = 'flydigi-dw4.service'
+SYSTEMCTL = shutil.which('systemctl') or '/usr/bin/systemctl'
+SUDO = shutil.which('sudo')
 LOCK_PATH = '/tmp/flydigi-tray.lock'
-INSTALL_HINT = '请先运行一次：sudo scripts/install_services.sh'
+INSTALL_HINT = '请运行一次：sudo scripts/install_services.sh（安装免密规则）'
 
 
 def _ensure_icon():
@@ -43,24 +45,35 @@ def _ensure_icon():
 
 
 def _systemctl(action):
-    """返回 (ok, 错误文本)。没有 polkit 权限时尝试 pkexec 弹一次授权框。"""
+    """返回 (ok, 错误文本)。
+
+    先用 `sudo -n`（免密规则，绝不弹窗），再用 `systemctl --no-ask-password`
+    （polkit 已授权时可用）。两条都不弹密码框；失败就在托盘里显示提示。
+    """
+    errors = []
+    if SUDO:
+        try:
+            proc = subprocess.run(
+                [SUDO, '-n', SYSTEMCTL, action, SERVICE],
+                check=False, capture_output=True, text=True)
+            if proc.returncode == 0:
+                return True, ''
+            errors.append((proc.stderr or '').strip())
+        except OSError as exc:
+            errors.append(repr(exc))
     try:
-        proc = subprocess.run(['systemctl', action, SERVICE],
-                              check=False, capture_output=True, text=True)
-        err = (proc.stderr or '').strip()
-        if proc.returncode != 0 and 'Interactive authentication required' in err:
-            proc = subprocess.run(['pkexec', 'systemctl', action, SERVICE],
-                                  check=False, capture_output=True, text=True)
-            err = (proc.stderr or '').strip()
-        if proc.returncode != 0:
-            print('systemctl %s 失败: %s' % (action, err), file=sys.stderr)
-            if 'Interactive authentication required' in err:
-                err += '\n\n' + INSTALL_HINT
-            return False, err or ('systemctl 退出码 %d' % proc.returncode)
-        return True, ''
+        proc = subprocess.run(
+            [SYSTEMCTL, '--no-ask-password', action, SERVICE],
+            check=False, capture_output=True, text=True)
+        if proc.returncode == 0:
+            return True, ''
+        errors.append((proc.stderr or '').strip())
     except OSError as exc:
-        print('systemctl %s 失败: %r' % (action, exc), file=sys.stderr)
-        return False, repr(exc)
+        errors.append(repr(exc))
+
+    err = '\n'.join(e for e in errors if e) or 'systemctl 执行失败'
+    print('systemctl %s 失败: %s' % (action, err), file=sys.stderr)
+    return False, err + '\n\n' + INSTALL_HINT
 
 
 def _state():

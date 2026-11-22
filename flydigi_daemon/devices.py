@@ -218,8 +218,8 @@ class VirtualMouse(object):
         self.name = name
         self.cur = set()
 
-    def apply(self, buttons=frozenset(), dx=0, dy=0, wheel=0):
-        """一次 SYN 内写完鼠标键差量 + 相对移动 + 滚轮。"""
+    def apply(self, buttons=frozenset(), dx=0, dy=0, wheel=0, hwheel=0):
+        """一次 SYN 内写完鼠标键差量 + 相对移动 + 垂直/水平滚轮。"""
         buttons = set(buttons)
         changed = False
         for code in self.cur - buttons:
@@ -236,6 +236,9 @@ class VirtualMouse(object):
             changed = True
         if wheel:
             self.ui.write(ecodes.EV_REL, ecodes.REL_WHEEL, int(wheel))
+            changed = True
+        if hwheel:
+            self.ui.write(ecodes.EV_REL, ecodes.REL_HWHEEL, int(hwheel))
             changed = True
         if changed:
             self.ui.syn()

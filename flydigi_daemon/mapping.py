@@ -9,7 +9,8 @@
 * 每帧从零计算**期望状态**（手柄键集合、键盘键集合、鼠标键集合），再和
   上一帧做差量。多个物理键映射到同一目标时天然去重，不需要引用计数。
 * 键盘组合键拆成键集合；按下时先修饰键、后普通键，松开时反序。
-* 轴映射（`mouse:x` / `keypair` / `wheel:up` / 阈值按键）在 `axis.NAME` 下。
+* 轴映射（`mouse:x` / `keypair` / `wheel` 自动方向 / 固定滚轮 / 阈值按键）
+  在 `axis.NAME` 下。
 * `passthrough = true` 时标准手柄输入原样走；显式条目覆盖对应输入。
 * 组（`group = "gyro"`）关闭时，该条目按"松开/归零"处理。
 * 摇杆 Y 轴在引擎里统一成 **XInput 语义：向上为正**，与配置里的 `invert`
@@ -130,9 +131,10 @@ def parse_button_target(text):
                           % (name, ', '.join(sorted(MOUSE_BUTTONS))))
     if low.startswith('wheel:'):
         name = low[6:]
-        if name in ('up', 'down'):
-            return Target('wheel', 1 if name == 'up' else -1)
-        raise ConfigError('未知滚轮方向 %r（只能用 up/down）' % (name,))
+        if name in ('up', 'down', 'left', 'right'):
+            return Target('wheel', name)
+        raise ConfigError('未知滚轮方向 %r（按钮只能用 up/down/left/right）'
+                          % (name,))
     if low.startswith('toggle:'):
         name = low[7:]
         if not name:
@@ -144,6 +146,14 @@ def parse_button_target(text):
 def parse_axis_target(text):
     text = str(text).strip()
     low = text.lower()
+    if low == 'wheel':
+        return Target('wheel', 'auto')
+    if low.startswith('wheel:'):
+        name = low[6:]
+        if name in ('up', 'down', 'left', 'right', 'x', 'y', 'auto'):
+            return Target('wheel', name)
+        raise ConfigError('未知滚轮方向 %r（可用 up/down/left/right/x/y/auto）'
+                          % (name,))
     if low.startswith('mouse:'):
         name = low[6:]
         if name in ('x', 'y'):
@@ -297,6 +307,11 @@ def parse_axis_rule(name, data):
             raise ConfigError('[axis.%s] 不能映射到 mouse:%s'
                               % (name, target.value))
     elif target.kind == 'wheel':
+        # 轴目标选“滚轮（自动方向）”时默认按比例滚动；
+        # 显式写了 threshold/repeat_hz 的仍按固定滚轮处理。
+        if (target.value in ('auto', 'x', 'y') and 'max_hz' not in data
+                and 'threshold' not in data and 'repeat_hz' not in data):
+            rule.max_hz = 20.0
         if rule.max_hz > 0:
             # 比例滚轮：按键越深滚得越快，deadzone 以下停止。
             rule.deadzone = float(data.get('deadzone', 0.12))
@@ -447,6 +462,7 @@ class FrameState:
     dx: int = 0
     dy: int = 0
     wheel: int = 0
+    hwheel: int = 0
     groups: dict = field(default_factory=dict)
     toggled: tuple = ()
 
@@ -569,15 +585,18 @@ class Mapper(object):
         keys = set()
         mouse = set()
         wheel = 0
+        hwheel = 0
 
         for source, rule in self.profile.buttons.items():
             if source not in held or not self._active(rule.group):
                 continue
-            step = self._add_target(rule.target, pad_buttons, keys, mouse)
+            step, hstep = self._add_target(rule.target, pad_buttons,
+                                           keys, mouse)
             # 按钮类滚轮只在按下沿滚一格，不能按住 1000 Hz 连发。
             if rule.target.kind == 'wheel' and source not in pressed:
-                step = 0
+                step = hstep = 0
             wheel += step
+            hwheel += hstep
 
         for axis, rule in self.profile.axes.items():
             value = axis_norm(axis, raw)
@@ -588,8 +607,13 @@ class Mapper(object):
             else:
                 self._apply_axis(rule, value, dt, pad_axes, pad_triggers,
                                  pad_buttons, keys, mouse)
-                wheel += self._axis_wheel(rule, value, now, dt)
-                self._apply_keypair(rule, value, pad_buttons, keys, mouse)
+                step, hstep = self._axis_wheel(rule, value, now, dt)
+                wheel += step
+                hwheel += hstep
+                step, hstep = self._apply_keypair(rule, value, pad_buttons,
+                                                  keys, mouse)
+                wheel += step
+                hwheel += hstep
 
         dx, dy = self._flush_mouse()
         pad = PadState(buttons=frozenset(pad_buttons), hat=pad.hat,
@@ -597,7 +621,8 @@ class Mapper(object):
 
         out = FrameState(pad=pad, keys=frozenset(keys),
                          mouse=frozenset(mouse), dx=dx, dy=dy,
-                         wheel=int(wheel), groups=dict(self.groups),
+                         wheel=int(wheel), hwheel=int(hwheel),
+                         groups=dict(self.groups),
                          toggled=tuple(toggled))
         self._commit(out)
         self.prev_held = held
@@ -655,7 +680,7 @@ class Mapper(object):
                         extras=frozenset())
 
     def _add_target(self, target, pad_buttons, keys, mouse):
-        """应用一个按钮目标，返回滚轮格数。"""
+        """应用一个按钮目标，返回 (垂直滚轮, 水平滚轮) 格数。"""
         if target.kind == 'pad':
             pad_buttons.add(target.value)
         elif target.kind == 'key':
@@ -663,8 +688,15 @@ class Mapper(object):
         elif target.kind == 'mouse_button':
             mouse.add(target.value)
         elif target.kind == 'wheel':
-            return target.value
-        return 0
+            if target.value == 'up':
+                return 1, 0
+            if target.value == 'down':
+                return -1, 0
+            if target.value == 'left':
+                return 0, -1
+            if target.value == 'right':
+                return 0, 1
+        return 0, 0
 
     def _apply_axis(self, rule, value, dt, pad_axes, pad_triggers,
                     pad_buttons, keys, mouse):
@@ -715,56 +747,109 @@ class Mapper(object):
         degrees = (ema * dt) / params['counts_per_degree']
         self.acc['mouse:' + rule.target.value] += degrees * rule.sensitivity
 
+    def _wheel_vector(self, rule, value):
+        """返回 (轴 'x'/'y', 方向 ±1)；auto 按物理轴自动选左右/上下。"""
+        name = rule.target.value
+        if name == 'auto':
+            axis = 'x' if rule.axis in ('lx', 'rx') else 'y'
+            return axis, 1 if value >= 0 else -1
+        if name == 'x':
+            return 'x', 1 if value >= 0 else -1
+        if name == 'y':
+            return 'y', 1 if value >= 0 else -1
+        if name == 'up':
+            return 'y', 1
+        if name == 'down':
+            return 'y', -1
+        if name == 'left':
+            return 'x', -1
+        if name == 'right':
+            return 'x', 1
+        return None
+
     def _axis_wheel(self, rule, value, now, dt=0.0):
         if rule.target.kind != 'wheel':
-            return 0
+            return 0, 0
+        if rule.invert:
+            value = -value
+        vector = self._wheel_vector(rule, value)
+        if vector is None:
+            return 0, 0
+        axis, sign = vector
+
         if rule.max_hz > 0:
-            # 比例滚轮：rate = max_hz * ((v-dz)/(1-dz))^curve
-            state = self.axis_state.setdefault(id(rule), {'wheel_acc': 0.0})
+            # 比例滚轮：rate = max_hz * ((|v|-dz)/(1-dz))^curve
+            state = self.axis_state.setdefault(
+                id(rule), {'wheel_acc': 0.0, 'hwheel_acc': 0.0,
+                           'axis': None, 'sign': 0})
             dz = _clamp(rule.deadzone, 0.0, 0.95)
-            if value <= dz:
+            mag = abs(value)
+            if mag <= dz:
                 state['wheel_acc'] = 0.0
-                return 0
-            norm = (value - dz) / (1.0 - dz)
+                state['hwheel_acc'] = 0.0
+                state['axis'] = None
+                state['sign'] = 0
+                return 0, 0
+            if state['axis'] != axis or state['sign'] != sign:
+                state['wheel_acc'] = 0.0
+                state['hwheel_acc'] = 0.0
+                state['axis'] = axis
+                state['sign'] = sign
+            norm = (mag - dz) / (1.0 - dz)
             if rule.curve and rule.curve != 1.0:
                 norm = norm ** rule.curve
-            state['wheel_acc'] += (rule.max_hz * norm * dt *
-                                   (1 if rule.target.value > 0 else -1))
-            steps = int(state['wheel_acc'])
-            state['wheel_acc'] -= steps
-            return steps
+            key = 'wheel_acc' if axis == 'y' else 'hwheel_acc'
+            state[key] += rule.max_hz * norm * dt * sign
+            steps = int(state[key])
+            state[key] -= steps
+            if axis == 'y':
+                return steps, 0
+            return 0, steps
+
         state = self.axis_state.setdefault(
-            id(rule), {'active': False, 'next': 0.0})
+            id(rule), {'active': False, 'next': 0.0,
+                       'axis': None, 'sign': 0})
+        mag = abs(value)
+        if state['active'] and (state['axis'] != axis
+                                or state['sign'] != sign):
+            state['active'] = False
+            state['next'] = 0.0
         if state['active']:
-            if value <= rule.release_threshold:
+            if mag <= rule.release_threshold:
                 state['active'] = False
-                return 0
+                return 0, 0
             if rule.repeat_hz <= 0:
-                return 0
+                return 0, 0
             interval = 1.0 / rule.repeat_hz
             steps = 0
             while now >= state['next'] and steps < 10:
                 steps += 1
                 state['next'] += interval
-            return rule.target.value * steps
-        if value >= rule.threshold:
+            if axis == 'y':
+                return sign * steps, 0
+            return 0, sign * steps
+        if mag >= rule.threshold:
             state['active'] = True
+            state['axis'] = axis
+            state['sign'] = sign
             interval = 1.0 / rule.repeat_hz if rule.repeat_hz > 0 else 0.0
             state['next'] = now + interval
-            return rule.target.value
-        return 0
+            if axis == 'y':
+                return sign, 0
+            return 0, sign
+        return 0, 0
 
     def _apply_keypair(self, rule, value, pad_buttons, keys, mouse):
         if rule.target.kind != 'keypair':
-            return
+            return 0, 0
         state = self.axis_state.setdefault(id(rule), {'side': 0})
         scaled = _shape(value, rule)
         side = 0 if scaled == 0 else (1 if scaled > 0 else -1)
         state['side'] = side
         chosen = rule.pos if side > 0 else rule.neg if side < 0 else None
         if chosen is None:
-            return
-        self._add_target(chosen, pad_buttons, keys, mouse)
+            return 0, 0
+        return self._add_target(chosen, pad_buttons, keys, mouse)
 
     def _flush_mouse(self):
         dx = int(self.acc['mouse:x'])
@@ -778,7 +863,8 @@ class Mapper(object):
             return
         self.devices.pad.apply(out.pad)
         self.devices.keyboard.apply(out.keys)
-        self.devices.mouse.apply(out.mouse, out.dx, out.dy, out.wheel)
+        self.devices.mouse.apply(out.mouse, out.dx, out.dy,
+                                 out.wheel, out.hwheel)
 
 
 def describe(prev, cur):
@@ -803,6 +889,8 @@ def describe(prev, cur):
         parts.append('move(%d,%d)' % (cur.dx, cur.dy))
     if cur.wheel:
         parts.append('wheel%+d' % cur.wheel)
+    if cur.hwheel:
+        parts.append('hwheel%+d' % cur.hwheel)
     return ' '.join(parts)
 
 
@@ -880,8 +968,13 @@ def format_target(target, short=False):
             return '鼠标←→' if target.value == 'x' else '鼠标↑↓'
         return 'mouse:' + target.value
     if kind == 'wheel':
-        return ('滚轮↑' if target.value > 0 else '滚轮↓') if short \
-            else 'wheel:' + ('up' if target.value > 0 else 'down')
+        names = {'up': '滚轮↑', 'down': '滚轮↓', 'left': '滚轮←',
+                 'right': '滚轮→', 'x': '滚轮左右', 'y': '滚轮上下',
+                 'auto': '滚轮自动'}
+        if target.value == 'auto':
+            return '滚轮自动' if short else 'wheel'
+        return names.get(target.value, '滚轮') if short \
+            else 'wheel:' + str(target.value)
     if kind == 'toggle':
         if short:
             return '体感开关' if target.value == 'gyro' else '开关:' + target.value

@@ -253,6 +253,8 @@ def test_render_page():
     assert 'id="fx-snow"' in page
     assert 'id="fx-trail"' in page
     assert 'prefers-reduced-motion' in page
+    assert 'wheel:right' in page
+    assert '滚轮（自动方向' in page
     assert '保存到 user.toml' in page
 
 

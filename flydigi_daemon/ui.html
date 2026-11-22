@@ -155,6 +155,8 @@ button.primary:disabled { opacity: .5; cursor: default; }
         <tr><td>release_threshold</td><td>0 – 1</td><td>固定滚轮释放阈值，
           应小于 threshold（迟滞）。</td></tr>
         <tr><td>repeat_hz</td><td>0 – 60 Hz</td><td>固定滚轮连发；0=关闭。</td></tr>
+        <tr><td>wheel</td><td>自动/左/右/上/下</td><td>轴目标选“滚轮（自动方向）”时，
+          X 轴正负→右/左，Y 轴正负→上/下；也可固定选 wheel:left/right/up/down。</td></tr>
         <tr><td>invert</td><td>开/关</td><td>反转该轴方向。</td></tr>
       </table>
     </details>
@@ -218,6 +220,7 @@ const BUTTON_TARGET_OPTIONS = [
   ['mouse:middle', '鼠标中键'], ['mouse:side', '鼠标侧键'],
   ['mouse:extra', '鼠标附加键'],
   ['wheel:up', '滚轮上'], ['wheel:down', '滚轮下'],
+  ['wheel:left', '滚轮左'], ['wheel:right', '滚轮右'],
   ['toggle:gyro', '切换体感组 gyro'],
   ['__custom__', '自定义 / 键盘（用 ⌨ 录制组合键）'],
 ];
@@ -233,6 +236,10 @@ const AXIS_TARGET_OPTIONS = [
   ['xbox:abs_ry', '手柄轴 ABS_RY'],
   ['xbox:abs_z', '手柄扳机 ABS_Z'],
   ['xbox:abs_rz', '手柄扳机 ABS_RZ'],
+  ['wheel', '滚轮（自动方向：X=左右，Y=上下）'],
+  ['wheel:x', '滚轮左右（正→右，负→左）'],
+  ['wheel:y', '滚轮上下（正→上，负→下）'],
+  ['wheel:left', '滚轮左'], ['wheel:right', '滚轮右'],
   ['wheel:up', '滚轮上'], ['wheel:down', '滚轮下'],
   ['keypair', '两个方向各一个按键（keypair）'],
   ['__custom__', '自定义（键盘/鼠标键阈值等）'],
@@ -454,6 +461,12 @@ function targetSelect(input, options) {
       return;
     }
     input.value = select.value === '__inherit__' ? '' : select.value;
+    const card = input.closest('.axis-card');
+    if (card && (select.value === 'wheel' || select.value === 'wheel:x' ||
+                 select.value === 'wheel:y')) {
+      const maxHz = card.querySelector('[data-field="max_hz"]');
+      if (maxHz && !maxHz.value) maxHz.value = '20';
+    }
     input.dispatchEvent(new Event('input', {bubbles: true}));
     sync();
   });
@@ -476,7 +489,7 @@ function axisKind(card, target) {
   if (low === 'mouse:x' || low === 'mouse:y') {
     return card.dataset.axis.startsWith('gyro') ? 'gyro' : 'stick';
   }
-  if (low.startsWith('wheel:')) return 'wheel';
+  if (low === 'wheel' || low.startsWith('wheel:')) return 'wheel';
   if (low.startsWith('xbox:abs_')) return 'padaxis';
   if (low === 'none' || low === '') return 'none';
   if (low.startsWith('key:') || low.startsWith('mouse:') ||

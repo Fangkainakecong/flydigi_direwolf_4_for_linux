@@ -224,6 +224,48 @@ def test_mouse_move_accumulates_and_inverts():
     assert frame.pad.axes[1] == -1, frame.pad.axes     # 已接管，手柄回中
 
 
+def test_horizontal_wheel_button():
+    mapper = Mapper(profile({'lb': 'wheel:left', 'rb': 'wheel:right'}))
+    left = mapper.apply(raw(buttons={'lb'}), 0.0)
+    assert left.wheel == 0 and left.hwheel == -1, (left.wheel, left.hwheel)
+    right = mapper.apply(raw(buttons={'rb'}), 0.01)
+    assert right.wheel == 0 and right.hwheel == 1, (right.wheel, right.hwheel)
+
+
+def test_axis_wheel_auto_directions():
+    def wheel_step(axis, axes):
+        mapper = Mapper(profile({'axis': {axis: {
+            'target': 'wheel', 'deadzone': 0.0,
+            'max_hz': 20, 'curve': 1.0,
+        }}}))
+        mapper.apply(raw(axes=axes), 0.0)
+        return mapper.apply(raw(axes=axes), 0.1)
+
+    # rx 正 → 水平滚轮右；rx 负 → 左
+    frame = wheel_step('rx', (0, -1, 32767, -1))
+    assert frame.hwheel > 0 and frame.wheel == 0, frame
+    frame = wheel_step('rx', (0, -1, -32768, -1))
+    assert frame.hwheel < 0 and frame.wheel == 0, frame
+    # ry 正 → 垂直滚轮上；ry 负 → 下（axis_norm 向上为正）
+    frame = wheel_step('ry', (0, -1, 0, -32768))
+    assert frame.wheel > 0 and frame.hwheel == 0, frame
+    frame = wheel_step('ry', (0, -1, 0, 32767))
+    assert frame.wheel < 0 and frame.hwheel == 0, frame
+
+
+def test_axis_wheel_auto_defaults_proportional():
+    auto = parse_profile('t', {'axis': {
+        'rx': {'target': 'wheel'},
+        'ry': {'target': 'wheel:y'},
+    }})
+    assert auto.axes['rx'].max_hz == 20
+    assert auto.axes['ry'].max_hz == 20
+    fixed = parse_profile('t', {'axis': {
+        'rx': {'target': 'wheel', 'threshold': 0.5, 'repeat_hz': 10},
+    }})
+    assert fixed.axes['rx'].max_hz == 0
+
+
 def test_wheel_threshold_repeat_and_hysteresis():
     mapper = Mapper(profile({'axis': {'lt': {
         'target': 'wheel:up', 'threshold': 0.5,

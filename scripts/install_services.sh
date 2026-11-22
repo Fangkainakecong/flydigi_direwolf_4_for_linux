@@ -20,6 +20,8 @@ DAEMON=flydigi-dw4.service
 RULE=99-flydigi-dw4.rules
 POLKIT_DIR=/etc/polkit-1/rules.d
 POLKIT_RULE=$POLKIT_DIR/50-flydigi.rules
+SUDOERS=/etc/sudoers.d/flydigi
+SYSTEMCTL=$(command -v systemctl 2>/dev/null || true)
 TARGET_USER=${SUDO_USER:-$(id -un)}
 MODE=${1:-}
 
@@ -45,12 +47,31 @@ remove_polkit() {
   systemctl restart polkit 2>/dev/null || true
 }
 
+install_sudoers() {
+  [ -n "$SYSTEMCTL" ] || return 0
+  cat > "$SUDOERS" <<EOF
+$TARGET_USER ALL=(root) NOPASSWD: $SYSTEMCTL start $DAEMON, $SYSTEMCTL stop $DAEMON, $SYSTEMCTL restart $DAEMON
+EOF
+  chmod 440 "$SUDOERS"
+  if command -v visudo >/dev/null 2>&1; then
+    if ! visudo -cf "$SUDOERS" >/dev/null 2>&1; then
+      rm -f "$SUDOERS"
+      echo "⚠ sudoers 规则校验失败，已跳过（托盘可能仍会询问密码）"
+    fi
+  fi
+}
+
+remove_sudoers() {
+  rm -f "$SUDOERS"
+}
+
 case "$MODE" in
   remove|--remove)
     systemctl disable --now "$WATCH" 2>/dev/null || true
     systemctl disable --now "$DAEMON" 2>/dev/null || true
     rm -f "$SYSTEMD/$WATCH" "$SYSTEMD/$DAEMON" "$UDEV/$RULE"
     remove_polkit
+    remove_sudoers
     systemctl daemon-reload
     udevadm control --reload-rules 2>/dev/null || true
     echo "已卸载 $WATCH / $DAEMON / $RULE"
@@ -69,6 +90,7 @@ case "$MODE" in
     systemctl reset-failed "$DAEMON" 2>/dev/null || true
     systemctl disable --now "$DAEMON" 2>/dev/null || true
     install_polkit
+    install_sudoers
     systemctl enable --now "$WATCH"
     systemctl restart "$WATCH"
     echo "已启用 watch 模式：$WATCH 按需启动 $DAEMON"
@@ -88,6 +110,7 @@ case "$MODE" in
     udevadm trigger --subsystem-match=usb --attr-match=idVendor=045e 2>/dev/null || true
     systemctl reset-failed "$DAEMON" 2>/dev/null || true
     install_polkit
+    install_sudoers
     systemctl disable --now "$WATCH" 2>/dev/null || true
     systemctl enable --now "$DAEMON"
     systemctl restart "$DAEMON"

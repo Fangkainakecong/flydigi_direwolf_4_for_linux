@@ -438,15 +438,17 @@ python3 -m flydigi_daemon edit
   `toggle:gyro` 的键（桌面默认 Home）切换。四个配置都会显示这个勾选框。
 - 按钮：目标字符串，留空 = 继承默认，`none` = 关闭
 - **鼠标/手柄按键有下拉菜单**：按钮目标可选 A/B/X/Y/LB/RB/SELECT/START/
-  HOME/L3/R3、鼠标左右中侧键、滚轮、`toggle:gyro`；轴目标可选
-  `mouse:x` / `mouse:y`（鼠标左右/上下方向）、手柄轴、滚轮、keypair。
+  HOME/L3/R3、鼠标左右中侧键、滚轮上下左右、`toggle:gyro`；轴目标可选
+  `mouse:x` / `mouse:y`（鼠标左右/上下方向）、手柄轴、`wheel`（自动方向：
+  X 正负→右/左，Y 正负→上/下）、`wheel:x` / `wheel:y`、keypair。
 - 目标框旁的 **⌨🎮🖱** 仍然可以直接录制（适合自定义）：
   - ⌨ 键盘：组合键、单独修饰键、Esc/F1–F24/小键盘/媒体键
   - 🎮 手柄：按手柄上的 A/B/X/Y/LB/RB/十字/Start/Back/Home/L3/R3
   - 🖱 鼠标：点左/右/中/侧键
 - 长按手柄按钮会**保持键盘按键按下**，松开手柄才松开键盘（组合键也一样）
 - 摇杆：`deadzone` / `curve` / `max_speed` / `invert`
-- 扳机滚轮：`deadzone` / `max_hz` / `curve`（比例）或 `threshold` / `repeat_hz`（固定）
+- 滚轮（扳机/摇杆）：`deadzone` / `max_hz` / `curve`（比例）或
+  `threshold` / `repeat_hz`（固定）；支持垂直和水平滚轮
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
 - 视觉效果：深色粒子背景、下雪、不规律流星、鼠标拖尾和点击火花；保留
@@ -536,9 +538,11 @@ scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式�
 - 重启程序
 - 退出（停止映射并退出）
 
-控制 systemd 需要 polkit 权限；`sudo scripts/install_services.sh` 会创建
-`/etc/polkit-1/rules.d/50-flydigi.rules`，只允许当前用户管理 `flydigi-*`
-两个服务。没安装规则时，托盘会回退到 `pkexec` 弹一次管理员授权框。
+托盘不会再弹密码框：`sudo scripts/install_services.sh` 除了 polkit 规则外，
+还会安装 `/etc/sudoers.d/flydigi` 免密规则，只允许当前用户执行
+`systemctl start/stop/restart flydigi-dw4.service`。托盘优先用
+`sudo -n`，失败再用 `systemctl --no-ask-password`；两者都不弹密码，失败时
+只在托盘里显示提示。没安装过新规则的话，重新跑一次上面的安装命令即可。
 当前 Python/GTK 托盘实测 **RSS ≈ 49 MB，PSS ≈ 25 MB**（大部分是 GTK 共享库，
 不是 daemon 变胖；daemon 本身仍约 12 MB）。优先省内存可以用
 `scripts/install_tray.sh stop` 关掉托盘和自启动，需要时从桌面快捷方式再打开。
