@@ -198,10 +198,10 @@ python3 -m flydigi_daemon edit
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
 
-右上角有一个小电池图标：显示 daemon/`check` 最近一次用 cmd16 读到的电量
-（0..5 档换算成百分比）和固件版本；daemon 没运行过时会显示灰色 `—`。
-电量来自 `/var/lib/flydigi/status.json`，`sudo python3 -m flydigi_daemon check`
-也可以刷新一次。
+右上角有一个小电池图标：显示 daemon 用 cmd16 读到的电量（0..5 档换算成
+百分比）和固件版本。daemon **每 15 分钟**非阻塞刷新一次；手柄从休眠唤醒时
+会立即刷新，**点电池图标**也可以立即请求刷新。电量来自
+`/var/lib/flydigi/status.json`，`sudo python3 -m flydigi_daemon check` 也会写一次。
 
 保存时只把与 `default.toml` 不同的字段写进 `config/user.toml`（旧文件备份为
 `.bak`），不会覆盖默认配置。改完重启 daemon 生效。

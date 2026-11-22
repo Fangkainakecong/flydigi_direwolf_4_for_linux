@@ -33,7 +33,7 @@ status_file = ""
 # supervise/systemd 会保留一个很轻的监视进程，等下次按键/摇杆/体感操作再启动。
 idle_exit_s = 3600
 # 运行中每隔多少秒非阻塞查询一次电量/状态（写 status.json，供网页显示）。
-battery_refresh_s = 15
+battery_refresh_s = 900
 
 [device]
 vendor = 0x045e
