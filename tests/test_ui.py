@@ -23,6 +23,7 @@ DEFAULT = config.load(config.DEFAULT_PATH)
 
 def test_model_has_buttons_and_axes():
     model = ui.build_model(config.load())
+    assert model['editor'] == 6
     names = [p['name'] for p in model['profiles']]
     assert names[:4] == ['gamepad', 'desktop', 'media', 'passthrough']
     desktop = model['profiles'][1]
@@ -316,12 +317,13 @@ class _EditArgs(object):
     port = 0
 
 
-def test_editor_save_exits():
+def test_editor_save_keeps_running_until_page_close():
     old_user = ui.cfgmod.USER_PATH
     with tempfile.TemporaryDirectory() as tmp:
         ui.cfgmod.USER_PATH = os.path.join(tmp, 'user.toml')
         args = _EditArgs()
         args.port = _free_port()
+        args.page_close_grace = 0.2
         thread = threading.Thread(target=ui.run,
                                   args=(config.load(), args), daemon=True)
         try:
@@ -341,8 +343,17 @@ def test_editor_save_exits():
                          headers={'Content-Type': 'application/json'})
             payload = json.loads(conn.getresponse().read())
             assert payload['ok'], payload
-            thread.join(4)
-            assert not thread.is_alive(), '保存后编辑器没有退出'
+            time.sleep(0.8)
+            assert thread.is_alive(), '保存后编辑器不应立即退出'
+
+            conn = http.client.HTTPConnection('127.0.0.1', args.port,
+                                              timeout=1)
+            conn.request('POST', '/api/closed',
+                         body=json.dumps({'dirty': False}),
+                         headers={'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            thread.join(3)
+            assert not thread.is_alive(), '关闭页面后编辑器应退出'
         finally:
             ui.cfgmod.USER_PATH = old_user
 

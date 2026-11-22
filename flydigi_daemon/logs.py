@@ -30,5 +30,5 @@ def run(args):
     except OSError:
         print('（还没有编辑器日志；通过桌面快捷方式启动后才会生成）')
     print('\n提示：daemon/watch 的完整日志用 journalctl -f 查看；'
-          '编辑器保存后会退出。')
+          '编辑器关闭页面后退出。')
     return 0

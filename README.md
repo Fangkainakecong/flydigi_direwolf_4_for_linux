@@ -33,7 +33,7 @@ ForceAdapt、按游戏自动切配置不在本项目范围内。
 | 键盘组合键、鼠标方向/滚轮、轴死区/曲线 | ✅ |
 | 体感 → 鼠标、三步标定、Home 开关 gyro 组 | ✅ |
 | `FF_RUMBLE` 震动透传、切配置短震 | ✅ 软件链路验证 |
-| 本地可视化编辑器、电量显示、保存后退出 | ✅ |
+| 本地可视化编辑器、电量显示、保存后继续编辑 | ✅ |
 | 状态栏托盘：暂停/恢复、配置选择、编辑、重启、退出 | ✅ 当前已运行 |
 | systemd：daemon 开机自启 + udev 插拔；watch 可选 | ✅ |
 | 宏 / 软件连发 | ⏳ 不做（连发由板载负责） |
@@ -70,7 +70,7 @@ sudo python3 -m flydigi_daemon check
 # 2. 手动运行（自动启停装好后由 systemd 负责）
 sudo python3 -m flydigi_daemon run
 
-# 3. 图形化改映射（保存后自动退出）
+# 3. 图形化改映射（保存后继续，关闭页面后退出）
 python3 -m flydigi_daemon edit
 
 # 4. 自动启停（已安装过可跳过）
@@ -115,7 +115,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── ui.py                         # 本地网页编辑器服务端
 │   ├── ui.html                       # 编辑器前端（HTML/CSS/JS）
 │   ├── tray.py                       # GTK/AppIndicator 状态栏托盘
-│   ├── procname.py                   # prctl 设置进程 comm（flydigi-dw4 等）
+│   ├── procname.py                   # prctl 设置进程 comm（flydigi_DW4 等）
 │   ├── logs.py                       # journal + 编辑器日志入口
 │   └── xrelease.py                   # 通用 XTEST 幽灵按键清理
 ├── scripts/
@@ -252,8 +252,8 @@ FF_RUMBLE: 游戏 → 虚拟手柄 EV_FF → rumble.py → EP 0x05 12 字节包
 - 不实现宏；连发/turbo 由板载固件负责。
 - 2.4G 报文只有三轴角速度，没有原始加速度；真正的“平移→鼠标”不可用。
 - FF 目前只处理 `FF_RUMBLE`；复杂周期效果会忽略。
-- 编辑器保存后自动退出；页面关闭且未修改约 20 秒后退出；默认 30 分钟
-  无请求也会退出，不常驻后台。
+- 编辑器保存后继续运行，可以接着改；页面关闭且未修改约 20 秒后退出；
+  默认 30 分钟无请求也会退出，不常驻后台。
 
 ## 目标
 
@@ -423,8 +423,9 @@ python3 -m flydigi_daemon edit
 ```
 
 会启动只监听 `127.0.0.1:8765` 的本地网页并自动打开浏览器（`--port` 换端口，
-`--no-open` 不自动打开）。**保存后编辑器会自动退出**，不常驻后台；如果一直
-没保存，默认 30 分钟无请求也会退出（`--idle-timeout` 可调，0 = 不超时）。
+`--no-open` 不自动打开）。**保存后编辑器继续运行**，可以接着改；关闭页面且
+没有未保存修改时约 20 秒后退出。如果一直没操作，默认 30 分钟无请求也会退出
+（`--idle-timeout` 可调，0 = 不超时）。
 四套配置分页，**配置名可以直接改**（不再绑定 gamepad/desktop/media 的用途），
 每个物理键、每个轴（摇杆/扳机/体感）的目标和全部参数都能直接改：
 
@@ -448,8 +449,8 @@ python3 -m flydigi_daemon edit
 - 扳机滚轮：`deadzone` / `max_hz` / `curve`（比例）或 `threshold` / `repeat_hz`（固定）
 - 体感：`sensitivity` / `smoothing` / `deadband` / `invert`
 - 所有轴都可带 `group`
-- 视觉效果：深色粒子背景、下雪、鼠标拖尾和点击火花；保留原来的
-  `#12151c` 深色配色，并遵守系统 `prefers-reduced-motion`
+- 视觉效果：深色粒子背景、下雪、不规律流星、鼠标拖尾和点击火花；保留
+  原来的 `#12151c` 深色配色，并遵守系统 `prefers-reduced-motion`
 
 右上角有一个小电池图标：只显示 daemon 用 cmd16 读到的电量（0..5 档换算成
 百分比）和固件版本，不可点击。daemon **每 15 分钟**非阻塞刷新一次；手柄从
@@ -543,7 +544,7 @@ scripts/install_tray.sh stop    # 停止托盘 + 移除自启动（快捷方式�
 `scripts/install_tray.sh stop` 关掉托盘和自启动，需要时从桌面快捷方式再打开。
 
 进程名方面，启动时会用 `prctl(PR_SET_NAME)` 把 `comm` 改成
-`flydigi-dw4` / `flydigi-tray`，`ps -o comm` 和任务管理器里不再是
+`flydigi_DW4` / `flydigi-tray`，`ps -o comm` 和任务管理器里不再是
 `python3`；完整命令行仍是 `python3 -m flydigi_daemon ...`。不需要编译打包；
 想要单个可执行文件时再用 PyInstaller/Nuitka。
 
@@ -556,7 +557,7 @@ journalctl -u flydigi-watch -u flydigi-dw4 -f
 ```
 
 - daemon / watch → systemd journal（自动写入；当前总 journal 约 64 MB）
-- 编辑器 → `/tmp/flydigi-edit.log`（自动写入；保存后自动退出）
+- 编辑器 → `/tmp/flydigi-edit.log`（自动写入；关闭页面后退出）
 - 托盘 → `/tmp/flydigi-tray.log`（自动写入）
 - 编辑器日志只在通过快捷方式启动时产生；`/tmp` 由系统按默认策略清理
 - journald 默认没有按时间删除的上限，只有磁盘比例上限。要收紧全局日志：

@@ -114,7 +114,7 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     set_name({
-        'run': 'flydigi-dw4',
+        'run': 'flydigi_DW4',
         'watch': 'flydigi-watch',
         'edit': 'flydigi-edit',
         'tray': 'flydigi-tray',

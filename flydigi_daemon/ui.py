@@ -152,7 +152,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 5, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 6, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +393,6 @@ class EditorServer(ThreadingHTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_request = time.time()
-        self.saved = False
         self.page_closed = None
         self.page_dirty = False
 
@@ -476,7 +475,6 @@ def make_handler(model, cfg):
                     state['model'] = build_model(state['cfg'])
                 except Exception:               # noqa: BLE001
                     pass
-                self.server.saved = True
             payload = {'ok': ok, 'errors': errors,
                        'path': cfgmod.USER_PATH}
             self._send(200 if ok else 400, json.dumps(payload),
@@ -510,7 +508,7 @@ def run(cfg, args):
         return 1
     print('可视化编辑器: %s' % url)
     print('保存到: %s' % cfgmod.USER_PATH)
-    print('保存后编辑器会自动退出；Ctrl-C 停止')
+    print('保存后编辑器继续运行；关闭页面后自动退出（Ctrl-C 停止）')
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
 
@@ -520,11 +518,6 @@ def run(cfg, args):
     def monitor():
         while True:
             time.sleep(0.5)
-            if server.saved:
-                time.sleep(0.5)
-                print('已保存，编辑器退出')
-                server.shutdown()
-                return
             closed_at = server.page_closed
             if (closed_at is not None and not server.page_dirty
                     and time.time() - closed_at >= close_grace):
