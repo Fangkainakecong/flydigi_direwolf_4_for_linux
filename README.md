@@ -212,7 +212,8 @@ flydigi_direwolf_4_for_linux/
 - **配置**：TOML（`tomli`），`default.toml` + `user.toml` 深合并
 - **编辑器**：Python 标准库 `http.server` + 原生 HTML/CSS/JS；只监听
   `127.0.0.1`
-- **服务**：systemd + journald；默认 `flydigi-dw4` 开机自启 + udev，watch 可选
+- **服务**：systemd + journald；默认只有 `flydigi-dw4` 开机自启 + udev；
+  `flydigi-watch` unit 保留但 disabled
 - **托盘**：PyGObject + AyatanaAppIndicator3 + XFCE status notifier（已安装）
 - **辅助**：X11 `libXtst`（可选的 XTEST 卡键清理）、`evdev` 的 Gamepad API
   录制
@@ -488,10 +489,20 @@ python3 -m flydigi_daemon devices
 安装/切换：
 
 ```bash
-sudo scripts/install_services.sh          # 默认：daemon 开机自启 + udev
-sudo scripts/install_services.sh --watch  # 可选：watch 按需启停
+sudo scripts/install_services.sh          # 默认：只有 daemon 开机自启；watch 保留但 disabled
+sudo scripts/install_services.sh --watch  # 可选：enable watch 按需启停
 sudo scripts/install_services.sh --remove # 卸载
 journalctl -u flydigi-dw4 -f
+```
+
+`watch` 的代码和 unit 都保留，只是默认不启用：
+
+```bash
+systemctl is-enabled flydigi-watch   # disabled
+systemctl is-active flydigi-watch    # inactive
+sudo systemctl start flydigi-watch   # 本次手动启动（不会开机自启）
+sudo scripts/install_services.sh --watch  # 改成 watch 模式（enable）
+sudo scripts/install_services.sh          # 切回 daemon-only（disable watch）
 ```
 
 默认 daemon-only 行为：

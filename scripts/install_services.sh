@@ -1,8 +1,8 @@
 #!/bin/sh
 # 安装/切换/卸载 Flydigi systemd 服务。需要 root。
 #
-#   sudo scripts/install_services.sh install  # daemon 开机自启 + udev（默认，不装 watch）
-#   sudo scripts/install_services.sh --watch  # 可选：安装 watch 按需启停
+#   sudo scripts/install_services.sh install  # daemon 开机自启 + udev（默认；watch 保留但 disabled）
+#   sudo scripts/install_services.sh --watch  # 可选：enable watch 按需启停
 #   sudo scripts/install_services.sh remove   # 停止并删除 service/udev/polkit
 #   install/remove 与 --daemon/--remove 等旧写法都兼容
 set -eu
