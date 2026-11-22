@@ -124,6 +124,7 @@ class Tray(object):
         self.menu.append(self.config_item)
         self._item('编辑配置', self.edit)
         self._separator()
+        self.hang_item = self._item('挂起', self.toggle_hang)
         self._item('重启程序', self.restart)
         self._item('退出', self.quit_all)
         self.ind.set_menu(self.menu)
@@ -196,8 +197,9 @@ class Tray(object):
                      }.get(state, state)
         self.state_item.set_label('daemon: ' + label)
         running = state in ('active', 'activating', 'reloading')
-        self.toggle_item.set_label(
-            '恢复映射' if paused or not running else '暂停映射')
+        self.toggle_item.set_label('暂停映射' if running else '恢复映射')
+        self.hang_item.set_label('恢复挂起' if running and paused else '挂起')
+        self.hang_item.set_sensitive(running)
         self._rebuild_profiles(cfg)
 
         current = None
@@ -240,25 +242,36 @@ class Tray(object):
 
     def toggle(self):
         state = _state()
-        try:
-            info = statusmod.read(cfgmod.load())
-        except (SystemExit, Exception):     # noqa: BLE001
-            info = None
-        paused = (bool(info and info.get('paused'))
-                  and state in ('active', 'activating', 'reloading'))
-        if paused:
-            ok = statusmod.request_resume()
-            action = '恢复'
-            err = '' if ok else '无法写入恢复标记'
-        elif state in ('active', 'activating', 'reloading'):
-            ok = statusmod.request_pause()
+        statusmod.clear_control()
+        if state in ('active', 'activating', 'reloading'):
+            ok, err = _systemctl('stop')
             action = '暂停'
-            err = '' if ok else '无法写入挂起标记'
         else:
             ok, err = _systemctl('start')
             action = '恢复'
         if not ok:
             self._error('无法%s映射' % action, err)
+            return
+        GLib.timeout_add_seconds(1, self.refresh)
+
+    def toggle_hang(self):
+        state = _state()
+        if state not in ('active', 'activating', 'reloading'):
+            self._error('无法挂起', 'daemon 未运行')
+            return
+        try:
+            info = statusmod.read(cfgmod.load())
+        except (SystemExit, Exception):     # noqa: BLE001
+            info = None
+        paused = bool(info and info.get('paused'))
+        if paused:
+            ok = statusmod.request_resume()
+            action = '恢复挂起'
+        else:
+            ok = statusmod.request_pause()
+            action = '挂起'
+        if not ok:
+            self._error('无法%s' % action, '无法写入控制标记')
             return
         GLib.timeout_add_seconds(1, self.refresh)
 
