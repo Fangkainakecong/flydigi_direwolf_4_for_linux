@@ -223,6 +223,18 @@ def test_status_roundtrip():
         assert oct(os.stat(path).st_mode & 0o777) == '0o644'
 
 
+def test_status_refresh_file():
+    old = status.REFRESH_FILE
+    with tempfile.TemporaryDirectory() as tmp:
+        status.REFRESH_FILE = os.path.join(tmp, 'refresh')
+        try:
+            assert status.refresh_mtime() == 0
+            status.request_refresh()
+            assert status.refresh_mtime() > 0
+        finally:
+            status.REFRESH_FILE = old
+
+
 def test_render_page():
     page = ui.render_page(ui.build_model(config.load()))
     assert '__MODEL__' not in page

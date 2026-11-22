@@ -31,6 +31,14 @@ python3 -m flydigi_daemon edit --no-open --port 8800
 保存只写与 `default.toml` 不同的字段到 `config/user.toml`；旧文件会留 `.bak`。
 保存成功后编辑器自动退出；`--idle-timeout` 控制未保存时的空闲退出（默认 1800 秒）。
 
+日志：
+
+```bash
+python3 -m flydigi_daemon logs
+python3 -m flydigi_daemon logs -f
+journalctl -u flydigi-watch -u flydigi-dw4 -f
+```
+
 XTEST 卡键清理（通用，不针对具体软件）：
 
 ```bash

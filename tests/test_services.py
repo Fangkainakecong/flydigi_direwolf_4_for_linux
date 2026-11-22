@@ -83,6 +83,26 @@ def test_activity_tolerates_noise_but_counts_motion():
     assert significant_change(idle, st(gyro=(20, 0, 0)))
 
 
+def test_identify_reply_parser():
+    d = bytearray(32)
+    d[14] = 0xA5
+    d[15] = 16
+    d[16] = 132
+    d[17:21] = b'\xcf\x53\x65\x38'
+    d[21] = 0x40
+    d[22] = 0x72
+    d[23] = 3
+    d[25] = 0
+    d[27] = 3
+    info = usb.info_from_reply(bytes(d))
+    assert info['device_type'] == 132
+    assert info['battery'] == 3
+    assert info['fw'] == '4.0.7.2'
+    assert info['slot'] == 3
+    d[14] = 0
+    assert usb.info_from_reply(bytes(d)) is None
+
+
 def test_idle_config_default_present():
     cfg = config.load()
     assert int(cfg['daemon']['idle_exit_s']) == 3600

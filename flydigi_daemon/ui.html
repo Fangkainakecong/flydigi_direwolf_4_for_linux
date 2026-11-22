@@ -16,8 +16,12 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .help summary { cursor: pointer; color: #b9c9df; }
 .help p { margin: 7px 0 0; }
 .help b { color: #dce3ee; }
+.help table { border-collapse: collapse; margin-top: 8px; width: 100%; }
+.help th, .help td { text-align: left; padding: 3px 8px 3px 0;
+                     border-bottom: 1px solid #232c3b; vertical-align: top; }
+.help th { color: #b9c9df; font-weight: 500; }
 .battery { display: flex; align-items: center; gap: 7px; padding-top: 4px;
-           color: #9fb0c7; font-size: 12px; }
+           color: #9fb0c7; font-size: 12px; cursor: pointer; }
 .battery-body { width: 38px; height: 17px; border: 1.5px solid #6f7c93;
                 border-radius: 3px; padding: 2px; position: relative; }
 .battery-body::after { content: ""; position: absolute; right: -5px; top: 4px;
@@ -116,8 +120,32 @@ button.primary:disabled { opacity: .5; cursor: default; }
         组默认开启；取消 = 默认关闭，需要按映射到 <code>toggle:gyro</code> 的键
         （桌面配置默认是 Home）在运行时打开。四个配置都会显示这个勾选。</p>
     </details>
+    <details class="help">
+      <summary>参数范围 / 适用对象</summary>
+      <table>
+        <tr><th>参数</th><th>范围</th><th>说明</th></tr>
+        <tr><td>deadzone</td><td>0 – 0.95</td><td>归一化死区。0=无死区；摇杆常用
+          0.08–0.15，扳机/滚轮 0.1–0.2。超过 0.95 按 0.95 处理。</td></tr>
+        <tr><td>deadband</td><td>0 – 20 raw</td><td>体感角速度死区，不是归一化值；
+          静止噪声约 0.1–1.3，常用 1–3。只对 gyro 轴有效。</td></tr>
+        <tr><td>curve</td><td>0.1 – 8</td><td>1=线性；&gt;1 时轻推/轻按更慢、
+          重推更快。对摇杆/keypair/滚轮有效，体感不用它。</td></tr>
+        <tr><td>max_speed</td><td>50 – 5000 px/s</td><td>摇杆满推时鼠标速度。</td></tr>
+        <tr><td>sensitivity</td><td>0.1 – 30 px/°</td><td>体感灵敏度；90° 转动约
+          移动 sensitivity×90 像素。</td></tr>
+        <tr><td>smoothing</td><td>0 – 0.95</td><td>体感 EMA 平滑；0=不滤波，
+          越大越稳但延迟越明显。</td></tr>
+        <tr><td>max_hz</td><td>1 – 60 格/秒</td><td>比例滚轮按到底时的速度；
+          轻按按比例变慢。</td></tr>
+        <tr><td>threshold</td><td>0 – 1</td><td>轴变成按键/滚轮的触发阈值。</td></tr>
+        <tr><td>release_threshold</td><td>0 – 1</td><td>固定滚轮释放阈值，
+          应小于 threshold（迟滞）。</td></tr>
+        <tr><td>repeat_hz</td><td>0 – 60 Hz</td><td>固定滚轮连发；0=关闭。</td></tr>
+        <tr><td>invert</td><td>开/关</td><td>反转该轴方向。</td></tr>
+      </table>
+    </details>
   </div>
-  <div class="battery unknown" id="battery" title="电量">
+  <div class="battery unknown" id="battery" title="点击刷新电量">
     <div class="battery-body"><div class="battery-fill" id="battery-fill"></div></div>
     <span id="battery-text">—</span>
   </div>
@@ -145,16 +173,16 @@ button.primary:disabled { opacity: .5; cursor: default; }
 const MODEL = __MODEL__;
 const AXIS_FIELDS = [
   ['group', '组', 'text'],
-  ['deadzone', '死区 0..1', 'number'],
-  ['curve', '曲线', 'number'],
-  ['max_speed', '满推 px/s', 'number'],
-  ['sensitivity', '灵敏度 px/°', 'number'],
-  ['smoothing', '平滑', 'number'],
-  ['deadband', '体感死区 raw', 'number'],
-  ['max_hz', '滚轮格/秒（比例）', 'number'],
-  ['threshold', '阈值（固定/按键）', 'number'],
-  ['release_threshold', '释放阈值', 'number'],
-  ['repeat_hz', '固定连发 Hz（比例=0）', 'number'],
+  ['deadzone', '死区 0–0.95', 'number'],
+  ['curve', '曲线 0.1–8', 'number'],
+  ['max_speed', '满推 50–5000 px/s', 'number'],
+  ['sensitivity', '灵敏度 0.1–30 px/°', 'number'],
+  ['smoothing', '平滑 0–0.95', 'number'],
+  ['deadband', '体感死区 0–20 raw', 'number'],
+  ['max_hz', '滚轮 1–60 格/秒', 'number'],
+  ['threshold', '阈值 0–1', 'number'],
+  ['release_threshold', '释放阈值 0–1', 'number'],
+  ['repeat_hz', '固定连发 0–60 Hz', 'number'],
   ['neg', '负向目标', 'text'],
   ['pos', '正向目标', 'text'],
 ];
@@ -191,6 +219,29 @@ const AXIS_TARGET_OPTIONS = [
   ['keypair', '两个方向各一个按键（keypair）'],
   ['__custom__', '自定义（键盘/鼠标键阈值等）'],
 ];
+
+const FIELD_META = {
+  deadzone: {min: 0, max: 0.95, step: 0.01,
+             help: '0–0.95 归一化；0=无死区，摇杆常用 0.08–0.15'},
+  curve: {min: 0.1, max: 8, step: 0.1,
+          help: '0.1–8；1=线性，越大轻推越慢'},
+  max_speed: {min: 50, max: 5000, step: 50,
+              help: '50–5000 像素/秒（满推），只对摇杆→鼠标有效'},
+  sensitivity: {min: 0.1, max: 30, step: 0.1,
+                help: '0.1–30 像素/度，只对体感有效'},
+  smoothing: {min: 0, max: 0.95, step: 0.05,
+              help: '0–0.95；0=不滤波，越大越稳但越拖'},
+  deadband: {min: 0, max: 20, step: 0.5,
+             help: '0–20 raw 角速度；1.5 左右；不是归一化死区'},
+  max_hz: {min: 1, max: 60, step: 1,
+           help: '1–60 格/秒；比例滚轮按到底的速度'},
+  threshold: {min: 0, max: 1, step: 0.05,
+              help: '0–1；轴变成按键/滚轮时的触发点'},
+  release_threshold: {min: 0, max: 1, step: 0.05,
+                      help: '0–1；应小于 threshold，形成迟滞'},
+  repeat_hz: {min: 0, max: 60, step: 1,
+              help: '0–60 Hz；固定模式连发，0=关闭'},
+};
 
 const MODIFIERS = {
   ControlLeft: 'ctrl', ControlRight: 'rightctrl',
@@ -466,7 +517,15 @@ function buildAxisCard(profile, axis) {
     const row = el('div', {class: 'row f-field'});
     row.dataset.field = field;
     row.append(el('label', {}, label));
-    const input = el('input', {type, 'data-field': field, step: 'any'});
+    const meta = FIELD_META[field];
+    const attrs = {type, 'data-field': field};
+    if (meta) {
+      attrs.min = meta.min;
+      attrs.max = meta.max;
+      attrs.step = meta.step;
+      attrs.title = meta.help;
+    }
+    const input = el('input', attrs);
     const value = axis.value ? axis.value[field] : undefined;
     if (value !== undefined && value !== null) input.value = value;
     row.append(input);
@@ -682,5 +741,14 @@ document.getElementById('save').addEventListener('click', async () => {
 
 refreshStatus();
 setInterval(refreshStatus, 30000);
+document.getElementById('battery').addEventListener('click', async () => {
+  setStatus('请求刷新电量…');
+  try {
+    await fetch('/api/refresh', {method: 'POST'});
+    setTimeout(refreshStatus, 1200);
+  } catch (err) {
+    setStatus('刷新请求失败：' + err, 'err');
+  }
+});
 </script>
 </body></html>

@@ -42,6 +42,25 @@ def write(cfg, info):
         return None
 
 
+REFRESH_FILE = '/tmp/flydigi-battery-refresh'
+
+
+def request_refresh():
+    """网页点“刷新电量”时写一个时间戳；daemon 轮询它。"""
+    try:
+        with open(REFRESH_FILE, 'w', encoding='utf-8') as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def refresh_mtime():
+    try:
+        return os.stat(REFRESH_FILE).st_mtime
+    except OSError:
+        return 0.0
+
+
 def read(cfg):
     from . import config as cfgmod
     path = cfgmod.status_file(cfg)

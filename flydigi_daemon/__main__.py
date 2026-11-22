@@ -65,6 +65,11 @@ def build_parser():
     cal.add_argument('--output', default=None,
                      help='输出路径（默认 config/calibration.json）')
 
+    logs = sub.add_parser('logs', help='查看 daemon/watch/编辑器日志')
+    logs.add_argument('-n', '--lines', type=int, default=80)
+    logs.add_argument('-f', '--follow', action='store_true',
+                      help='持续跟随 daemon/watch 日志')
+
     dev = sub.add_parser('devices',
                          help='列出 045e:028e 手柄并显示会选哪一个')
     dev.add_argument('--config', default=None)
@@ -117,6 +122,9 @@ def main(argv=None):
         if args.cmd == 'calibrate':
             from .calibrate import run as calibrate_run
             return calibrate_run(cfg, args, cfgmod.calibration_file(cfg))
+        if args.cmd == 'logs':
+            from .logs import run as logs_run
+            return logs_run(args)
         if args.cmd == 'devices':
             from . import usb
             devcfg = cfgmod.device_section(cfg)

@@ -867,16 +867,25 @@ jstest /dev/input/jsN
 - 短震反馈等 M5 接上 FF 后补；现在是终端打印 `[group] gyro=on/off`
 - 验收：桌面全局可移动/点击；360° 标定可复现
 
-### M5：震动透传
+### M5：震动透传（代码完成，待硬件验收）
 
-- uinput `FF_RUMBLE` → 12 字节模板，50 Hz；strong/weak → 0..255
-- `--sweep` 标定 `[3]/[5]/[7]` 三字节语义，结果回填 `config/default.toml`
-- 验收：游戏震动正常；停止无残留；p99 < 5 ms
+实现：`flydigi_daemon/rumble.py`；`tests/test_rumble.py` 离线校验包格式。
 
-### M6：服务化
+- 虚拟手柄声明 `EV_FF`/`FF_RUMBLE`；daemon 从 `UInput.fd` 读
+  `UI_FF_UPLOAD`/`EV_FF`，strong/weak → 0..255，按 50 Hz 发 12 字节包
+- 非阻塞 OUT URB；`SELECT+A/B/X/Y` 切换成功时短震一次
+  （`[feedback] profile_switch`，默认 short）
+- `[3]/[5]/[7]` 语义仍按出厂模板；`--sweep` 可继续标定
+- 验收：游戏震动正常；停止无残留；切换配置有反馈
 
-- systemd unit、udev 规则、安装/卸载脚本、非 root 运行（`input` 组 + uinput 权限）
-- 热插拔、`systemctl restart` 无卡键、拔插自动恢复
+### M6：服务化（已安装，active）
+
+- `flydigi-watch.service` + `flydigi-dw4.service`；`install_services.sh`
+  安装/卸载；无需 udev（watch 轮询 sysfs）
+- 设备按 `product_hint` 选择；接管优先只解绑本接口，有其它 xpad 手柄时
+  不做全局 `modprobe -r`
+- 1 小时无真实操作退出；拔插自动恢复；空闲退出后由下一次按键/摇杆/扳机
+  触发重启
 - 验收：拔插 10 次不掉；重启服务不粘键
 
 ### M7：收尾

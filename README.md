@@ -42,8 +42,12 @@ collection），本项目在其转录的**老方言 (XInput legacy) 协议**基�
   `tests/test_m3.py` + `tests/test_show.py` 共 24 项离线全过
 - 🟡 **M4 代码完成，待标定/硬件验收**：体感积分 → 鼠标、`calibrate` 三步标定、
   Home 切换 gyro 组；`tests/test_m4.py` 15 项离线全过
-- ⏳ FF 震动透传（M5）尚未实现；宏按需再加
-  （**连发由板载负责**，daemon 不做软件连发）
+- 🟡 **M5 震动透传代码完成，待硬件验收**：虚拟手柄声明 `FF_RUMBLE`，
+  daemon 处理游戏 FF 上传/播放，翻译成 12 字节 rumble 包；
+  `SELECT+A/B/X/Y` 成功切换时会短震一次（`[feedback] profile_switch`）
+- 🟡 **M6 自动启停已安装并 active**：`flydigi-watch` 按设备/操作启停
+  `flydigi-dw4`，1 小时空闲退出，拔插自动恢复
+- ⏳ 宏按需再加（**连发由板载负责**，daemon 不做软件连发）
 
 ### 快速开始
 
@@ -142,6 +146,22 @@ curve = 1.5
 
 `curve` 越大，轻推/轻按越慢、重推/重按越快；`show` 会显示最终生效值。
 
+编辑器顶部「参数范围 / 适用对象」里有一张表，主要范围：
+
+| 参数 | 范围 | 说明 |
+|---|---|---|
+| `deadzone` | 0–0.95 | 归一化死区；摇杆常用 0.08–0.15 |
+| `deadband` | 0–20 raw | 体感角速度死区，**不是**死区百分比 |
+| `curve` | 0.1–8 | 1=线性 |
+| `max_speed` | 50–5000 px/s | 摇杆满推鼠标速度 |
+| `sensitivity` | 0.1–30 px/° | 体感 |
+| `smoothing` | 0–0.95 | 体感平滑；0=不滤波 |
+| `max_hz` | 1–60 格/秒 | 比例滚轮最大速度 |
+| `threshold` / `release_threshold` | 0–1 | 轴按键/固定滚轮阈值 |
+| `repeat_hz` | 0–60 Hz | 固定滚轮连发；0=关 |
+
+超出范围保存时会直接报错，不会写坏 `user.toml`。
+
 `show --html` 生成 `config/mappings.html`（自包含单文件，不进 git），
 四个槽各一页，按钮卡片 + 轴参数表，改完重新生成即可。
 
@@ -232,6 +252,18 @@ journalctl -u flydigi-watch -u flydigi-dw4 -f
   如果游戏区分 1P/2P，按需要在游戏或 Steam 里调顺序。
 - 如果产品名不同，`devices` 会打印实际名字；把 `[device] product_hint`
   改成能唯一定位 dongle 的字符串即可。
+
+## 日志
+
+```bash
+python3 -m flydigi_daemon logs          # daemon/watch journal + 编辑器日志
+python3 -m flydigi_daemon logs -f       # 持续跟随
+journalctl -u flydigi-watch -u flydigi-dw4 -f
+```
+
+- daemon / watch → systemd journal
+- 编辑器 → `/tmp/flydigi-edit.log`（保存后自动退出）
+- 编辑器日志不会常驻；只有通过快捷方式启动过才会有
 
 ## 故障排查：Ctrl/Shift 卡住、鼠标左右键错乱
 

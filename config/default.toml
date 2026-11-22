@@ -32,6 +32,8 @@ status_file = ""
 # 超过这个时间没有任何有效操作就自动退出（0 = 不自动退出）。
 # supervise/systemd 会保留一个很轻的监视进程，等下次按键/摇杆/体感操作再启动。
 idle_exit_s = 3600
+# 运行中每隔多少秒非阻塞查询一次电量/状态（写 status.json，供网页显示）。
+battery_refresh_s = 15
 
 [device]
 vendor = 0x045e

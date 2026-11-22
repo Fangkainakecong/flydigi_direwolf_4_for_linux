@@ -225,6 +225,28 @@ def _check_axis_name(name):
     return name
 
 
+AXIS_LIMITS = {
+    'deadzone': (0.0, 0.95, '0–0.95'),
+    'curve': (0.1, 8.0, '0.1–8'),
+    'max_speed': (50.0, 5000.0, '50–5000'),
+    'sensitivity': (0.1, 30.0, '0.1–30'),
+    'smoothing': (0.0, 0.95, '0–0.95'),
+    'deadband': (0.0, 20.0, '0–20'),
+    'max_hz': (0.0, 60.0, '0–60'),
+    'threshold': (0.0, 1.0, '0–1'),
+    'release_threshold': (0.0, 1.0, '0–1'),
+    'repeat_hz': (0.0, 60.0, '0–60'),
+}
+
+
+def _check_axis_ranges(name, rule):
+    for field, (low, high, text) in AXIS_LIMITS.items():
+        value = getattr(rule, field)
+        if value is not None and not (low <= value <= high):
+            raise ConfigError('[axis.%s] %s=%g 超出范围（%s）'
+                              % (name, field, value, text))
+
+
 def parse_axis_rule(name, data):
     if not isinstance(data, dict):
         raise ConfigError('[axis.%s] 必须是表' % (name,))
@@ -287,6 +309,7 @@ def parse_axis_rule(name, data):
                 rule.release_threshold = max(0.0, rule.threshold - 0.1)
             if rule.repeat_hz <= 0 and name in ('lt', 'rt'):
                 rule.repeat_hz = 18.0
+    _check_axis_ranges(name, rule)
     return rule
 
 

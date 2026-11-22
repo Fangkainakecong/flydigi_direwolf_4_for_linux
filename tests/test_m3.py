@@ -69,6 +69,17 @@ def test_unknown_key_name_suggests_nothing():
         raise AssertionError('应当报错')
 
 
+def test_axis_ranges_rejected():
+    for bad in ({'deadzone': 1.2}, {'curve': 0}, {'smoothing': 2},
+                {'max_hz': 100}, {'threshold': 1.5}):
+        try:
+            profile({'axis': {'lx': dict({'target': 'mouse:x'}, **bad)}})
+        except ConfigError:
+            pass
+        else:
+            raise AssertionError('应当拒绝 %r' % (bad,))
+
+
 def test_mouse_move_is_not_a_button_target():
     try:
         profile({'a': 'mouse:x'})

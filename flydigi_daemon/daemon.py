@@ -20,6 +20,7 @@ from . import report as rep
 from . import status as statusmod
 from . import usb
 from .devices import Devices, device_node, scan_event_nodes
+from .rumble import Rumble
 from .slots import SlotController
 from .translate import describe, significant_change, translate
 
@@ -95,6 +96,7 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
     pad = usb.Pad(dev, interface=devcfg['interface'])
     link = None
     devs = None
+    rumble = None
     try:
         print('解绑驱动: %s' % pad.takeover())
         link = usb.Link(pad)
@@ -107,8 +109,13 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             print('⚠ cmd16 无应答（不影响转发，但读不到槽位）')
 
         if not dry_run:
-            devs = Devices(cfg)
+            rcfg = cfg.get('rumble', {}) or {}
+            with_ff = bool(rcfg.get('enabled', True))
+            devs = Devices(cfg, with_ff=with_ff)
             atexit.register(devs.close)
+            if with_ff:
+                rumble = Rumble(devs.pad.ui, pad, rcfg)
+                atexit.register(rumble.close)
             print('虚拟设备:')
             _print_devices(devs)
             print('提示：物理手柄已由 daemon 独占；Steam/RetroArch 用虚拟手柄。')
@@ -129,6 +136,9 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         if mapper is None:
             return 1
 
+        feedback = (cfg.get('feedback', {}) or {}).get('profile_switch',
+                                                        'short')
+
         def on_switch(index, name, letter):
             if devs is not None:
                 devs.release_all()
@@ -136,6 +146,8 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             print('%s 配置 → %d/%d %s（SELECT+%s）'
                   % (_fmt_elapsed(time.time() - t0), index + 1,
                      len(ctrl.profiles), name, letter.upper()))
+            if rumble is not None and feedback != 'none':
+                rumble.pulse(200, 120, 120)
 
         ctrl.on_switch = on_switch
         print('当前配置: %s（槽 %d/%d）'
@@ -144,8 +156,14 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         safety = cfgmod.safety_section(cfg)
         watchdog = float(safety.get('watchdog_ms', 1500)) / 1000.0
         release_after = float(safety.get('input_timeout_ms', 400)) / 1000.0
-        idle_exit = float(cfgmod.daemon_section(cfg).get('idle_exit_s', 3600)
-                          or 0)
+        daemon_cfg = cfgmod.daemon_section(cfg)
+        idle_exit = float(daemon_cfg.get('idle_exit_s', 3600) or 0)
+        battery_every = float(daemon_cfg.get('battery_refresh_s', 15) or 0)
+        battery_pending = False
+        battery_sent = 0.0
+        last_battery = time.time()
+        last_refresh = statusmod.refresh_mtime()
+        next_refresh_check = 0.0
         flag = {'running': True}
         _install_stop_handler(flag)
         print('开始转发（Ctrl-C 退出）…')
@@ -157,6 +175,23 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
         last_activity = time.time()
         while flag['running']:
             now = time.time()
+            if rumble is not None:
+                rumble.poll(now)
+            if now >= next_refresh_check:
+                next_refresh_check = now + 0.5
+                refresh = statusmod.refresh_mtime()
+                if refresh != last_refresh:
+                    last_refresh = refresh
+                    last_battery = 0.0
+                    battery_pending = False
+            if (battery_every > 0 and not battery_pending
+                    and now - last_battery >= battery_every):
+                link.send_async(usb.legacy(usb.CMD_IDENTIFY))
+                battery_pending = True
+                battery_sent = now
+            elif battery_pending and now - battery_sent > 2.0:
+                battery_pending = False
+                last_battery = now
             if seconds is not None and now - t0 >= seconds:
                 break
             if idle_exit > 0 and now - last_activity >= idle_exit:
@@ -170,6 +205,8 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
                 if not gap_released and now - link.last_data > release_after:
                     if devs is not None:
                         devs.release_all()
+                    if rumble is not None:
+                        rumble.stop()
                     mapper.reset()
                     prev = mapper.out
                     gap_released = True
@@ -203,8 +240,17 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
             link.last_data = time.time()
             if gap_released:
                 gap_released = False
+                last_battery = 0.0
+                battery_pending = False
                 print('输入恢复')
-            if len(data) < 32 or rep.is_reply(data):
+            if len(data) < 32:
+                continue
+            if rep.is_reply(data):
+                info = usb.info_from_reply(data)
+                if info:
+                    statusmod.write(cfg, info)
+                    last_battery = time.time()
+                    battery_pending = False
                 continue
             state = translate(data)
             if state is None:
@@ -238,6 +284,8 @@ def run_live(cfg, dry_run=False, seconds=None, profile=None,
     except KeyboardInterrupt:
         print('\n已中断，正在收尾…')
     finally:
+        if rumble is not None:
+            rumble.close()
         if devs is not None:
             devs.close()
             print('虚拟设备已移除')
@@ -278,6 +326,7 @@ def run_replay(cfg, path, dry_run=False, realtime=False,
     print('回放: %s（%d 帧%s）'
           % (path, len(frames), '，按原始节奏' if realtime else ''))
     devs = None
+    rumble = None
     if not dry_run:
         devs = Devices(cfg)
         print('虚拟设备:')
@@ -342,6 +391,8 @@ def run_replay(cfg, path, dry_run=False, realtime=False,
     except KeyboardInterrupt:
         print('\n已中断，正在收尾…')
     finally:
+        if rumble is not None:
+            rumble.close()
         if devs is not None:
             devs.close()
             print('虚拟设备已移除')

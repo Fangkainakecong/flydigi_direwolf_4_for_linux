@@ -539,6 +539,14 @@ class Link(object):
         for _ in range(n):
             self.in_ids.add(self.pad.submit(URB_INT, EP_IN, None, 64))
 
+    def send_async(self, data, out_size=None):
+        """只提交 OUT URB，不等回包；主循环继续处理输入流。
+
+        电量和状态查询用这个，避免 `identify()` 那种 0.6 秒的 drain 造成
+        鼠标/键盘卡顿。
+        """
+        return self.pad.submit(URB_INT, EP_OUT, data, out_size or len(data))
+
     def send(self, data, wait=0.5, out_size=None):
         """发一帧并等它在 OUT URB 上完成；期间继续 reap IN 保持管道畅通。"""
         uid = self.pad.submit(URB_INT, EP_OUT, data, out_size or len(data))
@@ -606,15 +614,10 @@ def van(frames, cmd=None):
     return out
 
 
-def identify(link, settle=0.6):
-    """cmd16：DeviceType / uid / 固件 / 电量 / 连接方式 / 当前板载槽位。"""
-    link.drain()
-    link.send(legacy(CMD_IDENTIFY))
-    frames = link.collect(settle)
-    got = van(frames, CMD_IDENTIFY)
-    if not got:
+def info_from_reply(d):
+    """从一帧注入区 cmd16 应答解析设备信息；不是 cmd16 返回 None。"""
+    if len(d) < 32 or d[14] != 0xA5 or d[15] != CMD_IDENTIFY:
         return None
-    d = got[0]
     return {
         'device_type': d[16],
         'uid': d[17:21].hex(),
@@ -624,6 +627,17 @@ def identify(link, settle=0.6):
         'slot': d[27],
         'raw': bytes(d[14:32]),
     }
+
+
+def identify(link, settle=0.6):
+    """cmd16：DeviceType / uid / 固件 / 电量 / 连接方式 / 当前板载槽位。"""
+    link.drain()
+    link.send(legacy(CMD_IDENTIFY))
+    frames = link.collect(settle)
+    got = van(frames, CMD_IDENTIFY)
+    if not got:
+        return None
+    return info_from_reply(got[0])
 
 
 def identify_retry(link, tries=4, delay=0.2, settle=0.6):
