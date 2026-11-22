@@ -23,7 +23,7 @@ DEFAULT = config.load(config.DEFAULT_PATH)
 
 def test_model_has_buttons_and_axes():
     model = ui.build_model(DEFAULT)
-    assert model['editor'] == 8
+    assert model['editor'] == 9
     names = [p['name'] for p in model['profiles']]
     assert names[:4] == ['gamepad', 'desktop', 'media', 'passthrough']
     desktop = model['profiles'][1]
@@ -198,6 +198,23 @@ def test_keyboard_target_names():
     for name in names:
         target = mapping.parse_button_target('key:' + name)
         assert target.kind == 'key'
+
+
+def test_save_dpad_uses_default_key_name():
+    posted = model_posted(ui.build_model(DEFAULT))
+    posted['profiles']['desktop']['buttons']['up'] = 'key:f'
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 'user.toml')
+        ok, errors = ui.save_overrides(DEFAULT, posted, path)
+        assert ok, errors
+        data = tomli.load(open(path, 'rb'))
+        desktop = data['profile']['desktop']
+        assert desktop['dpad_up'] == 'key:f'
+        assert 'up' not in desktop
+        merged = config.load(config.DEFAULT_PATH, user_path=path)
+        parsed = mapping.parse_config(merged)
+        assert parsed['desktop'].buttons['up'].target.value == \
+            (mapping._KEY_CODES['f'],)
 
 
 def test_save_ignores_none_and_nan_axis_fields():

@@ -155,7 +155,7 @@ def build_model(cfg):
             'buttons': buttons,
             'axes': axes,
         })
-    return {'editor': 8, 'profiles': profiles, 'targets': COMMON_TARGETS}
+    return {'editor': 9, 'profiles': profiles, 'targets': COMMON_TARGETS}
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,9 @@ def _profile_overrides(default_profiles, original, posted, existing, full):
             continue
         base = button_value(dft, source)
         if full or value != base:
-            prof[source] = value
+            # default.toml 用 dpad_up/dpad_down/...，UI 用归一化后的
+            # up/down/...；写回时沿用默认键名，避免 parse 时重复。
+            prof[mapping.CONFIG_SOURCE_KEYS.get(source, source)] = value
 
     axes = posted.get('axes') or {}
     for axis, value in axes.items():
@@ -294,8 +296,11 @@ def _profile_overrides(default_profiles, original, posted, existing, full):
         elif key in ('passthrough', 'groups'):
             # 这两个由上面的 UI 状态决定，不能把旧值原样带回来。
             continue
-        elif key not in managed_sources and key not in prof:
-            prof[key] = value
+        else:
+            normalized = mapping.SOURCE_ALIASES.get(str(key).lower(),
+                                                    str(key).lower())
+            if normalized not in managed_sources and key not in prof:
+                prof[key] = value
     return prof
 
 
@@ -335,6 +340,15 @@ def apply_overrides(default_cfg, posted, existing):
                                   existing, full)
         if prof or full:
             new_profiles[new] = prof
+
+    # 兼容旧版本写出的 up/down/left/right；统一成 dpad_*，否则和
+    # default.toml 的 dpad_* 合并后会变成同一个物理键两次。
+    for prof in new_profiles.values():
+        if not isinstance(prof, dict):
+            continue
+        for alias, canonical in mapping.CONFIG_SOURCE_KEYS.items():
+            if alias in prof:
+                prof[canonical] = prof.pop(alias)
 
     slots = [finals.get(name, name) for name in base_slots]
     startup = finals.get(base_startup, base_startup) if base_startup else None

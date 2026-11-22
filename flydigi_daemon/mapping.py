@@ -36,6 +36,12 @@ SOURCE_ALIASES = {
     'dpad_up': 'up', 'dpad_down': 'down', 'dpad_left': 'left',
     'dpad_right': 'right', 'guide': 'home', 'select': 'back',
 }
+# 写回 TOML 时尽量沿用 default.toml 的键名，避免 dpad_up 和 up
+# 同时存在、解析时归一化成同一个物理键而报“重复”。
+CONFIG_SOURCE_KEYS = {
+    'up': 'dpad_up', 'down': 'dpad_down',
+    'left': 'dpad_left', 'right': 'dpad_right',
+}
 SOURCES = {
     'a', 'b', 'x', 'y', 'lb', 'rb', 'back', 'start', 'home',
     'l3', 'r3', 'up', 'down', 'left', 'right',
