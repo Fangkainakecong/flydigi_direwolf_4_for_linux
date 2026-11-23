@@ -18,8 +18,8 @@ from evdev import ecodes                              # noqa: E402
 
 from flydigi_daemon import config                     # noqa: E402
 from flydigi_daemon.mapping import (                  # noqa: E402
-    ConfigError, Mapper, axis_norm, gate_errors, lint_config,
-    parse_config, parse_profile)
+    ConfigError, Mapper, axis_norm, format_target, gate_errors,
+    lint_config, parse_button_target, parse_config, parse_profile)
 from flydigi_daemon.translate import PadState, translate   # noqa: E402
 
 
@@ -396,6 +396,13 @@ def test_gate_errors_helper_reports_all():
                           'profile': {'a': {'a': 'key:bad'}}})
     assert any('slot_profiles' in e for e in errors), errors
     assert any('未知按键名' in e for e in errors), errors
+
+
+def test_mute_shows_as_mute():
+    """113 同时叫 MIN_INTERESTING 和 MUTE，显示统一用 mute。"""
+    assert format_target(parse_button_target('key:mute')) == 'key:mute'
+    assert format_target(parse_button_target('key:min_interesting')) == \
+        'key:mute'
 
 
 def main():

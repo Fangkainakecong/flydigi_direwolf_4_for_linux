@@ -173,6 +173,7 @@ flydigi_direwolf_4_for_linux/
 │   ├── daemon-plan.md                # 架构/方案/M0–M7 任务与验收
 │   ├── input-report.md               # 32 字节报文权威布局
 │   ├── inputs-quickref.md            # 输入/体感/加速度一页速查
+│   ├── keyboard-keys.md              # 键盘按键中文名/英文名对照表
 │   ├── findings-motion.md            # 角速度、姿态字节、加速度实测
 │   ├── findings-slot-audit.md        # 四槽/按键复核/切槽假象
 │   ├── findings-profile-blob.md      # 840 字节 profile 格式
@@ -335,6 +336,9 @@ neg = "key:a"
 pos = "key:d"
 deadzone = 0.35
 ```
+
+`key:` 后面可用的英文名、中文名、键码见
+[docs/keyboard-keys.md](docs/keyboard-keys.md)（249 个键 + 常用组合键示例）。
 
 改完先看效果，再启动：
 

@@ -958,6 +958,9 @@ _KEY_DISPLAY = {
     ecodes.KEY_ENTER: 'enter', ecodes.KEY_BACKSPACE: 'backspace',
     ecodes.KEY_TAB: 'tab', ecodes.KEY_PAGEUP: 'pageup',
     ecodes.KEY_PAGEDOWN: 'pagedown',
+    # evdev 把 113 同时叫 KEY_MIN_INTERESTING / KEY_MUTE，反查会拿到
+    # 前者；统一显示成读者认识的 mute（两者写进映射都能解析）。
+    ecodes.KEY_MUTE: 'mute',
 }
 
 
