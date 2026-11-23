@@ -68,6 +68,13 @@ def test_dpad_becomes_hat():
     assert translate(frame(btn=STD['left'] | STD['up'])).hat == (-1, -1)
 
 
+def test_dpad_is_also_a_button():
+    """映射层按 up/down/left/right 查表，translate 必须一起带出来。"""
+    st = translate(frame(btn=STD['up'] | STD['right']))
+    assert st.buttons == frozenset({'up', 'right'}), st.buttons
+    assert st.hat == (1, -1), st.hat
+
+
 def test_axes_and_triggers():
     st = translate(frame(lt=12, rt=200, axes=(12345, 100, -20000, -1)))
     assert st.axes == (12345, invert16(100), -20000, invert16(-1)), st.axes

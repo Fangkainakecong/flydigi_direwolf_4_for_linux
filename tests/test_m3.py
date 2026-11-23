@@ -7,6 +7,7 @@
 """
 
 import os
+import struct
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,7 @@ from flydigi_daemon import config                     # noqa: E402
 from flydigi_daemon.mapping import (                  # noqa: E402
     ConfigError, Mapper, axis_norm, gate_errors, lint_config,
     parse_config, parse_profile)
-from flydigi_daemon.translate import PadState         # noqa: E402
+from flydigi_daemon.translate import PadState, translate   # noqa: E402
 
 
 def raw(buttons=(), extras=(), axes=(0, -1, 0, -1), triggers=(0, 0)):
@@ -190,6 +191,20 @@ def test_dpad_buttons_are_not_passed_when_mapped():
     frame = mapper.apply(raw(buttons={'up', 'down'}), 0.0)
     assert frame.pad.hat == (0, 1), frame.pad.hat      # 只剩 down
     assert frame.keys == frozenset({ecodes.KEY_W})
+
+
+def test_dpad_frame_reaches_key_targets():
+    """十字键在报文里只有标准按钮字 + hat；映射层要能拿到 up/down/…"""
+    data = bytearray(32)
+    data[1] = 0x14
+    struct.pack_into('<H', data, 2, 0x01)              # 十字 ↑
+    state = translate(bytes(data))
+    assert state.buttons == frozenset({'up'}), state.buttons
+    assert state.hat == (0, -1), state.hat
+    mapper = Mapper(profile({'dpad_up': 'key:up'}))
+    frame = mapper.apply(state, 0.0)
+    assert frame.keys == frozenset({ecodes.KEY_UP}), frame.keys
+    assert frame.pad.hat == (0, 0), frame.pad.hat       # 非透传不写 hat
 
 
 # ---------------------------------------------------------------------------

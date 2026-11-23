@@ -21,10 +21,19 @@ PAD_BUTTONS = ('a', 'b', 'x', 'y', 'lb', 'rb', 'back', 'start',
 # 只在飞智位图里出现的键（M1 只记录，不转发）。
 EXTRA_KEYS = ('m1', 'm2', 'fn', 'turbo')
 
+# 十字键：报文里既在标准按钮字里，又合并成 hat。映射层把它当四个普通
+# 物理键（`dpad_up`/`up` → `key:up` 之类），所以 `buttons` 里要带上；
+# 虚拟手柄仍然只把 hat 写进 ABS_HAT0X/Y（BUTTON_MAP 里没有这四个名字）。
+DPAD_BUTTONS = ('up', 'down', 'left', 'right')
+
 
 @dataclass(frozen=True)
 class PadState:
-    """一份可以直接写进虚拟手柄的状态。"""
+    """一份可以直接写进虚拟手柄的状态。
+
+    `buttons` 里可能带十字键的 `up`/`down`/`left`/`right`（映射层要用），
+    `VirtualGamepad` 只按 `BUTTON_MAP` 写，十字键仍走 `hat`，不会重复。
+    """
     buttons: frozenset = frozenset()
     hat: tuple = (0, 0)                 # (x, y)，-1/0/1
     axes: tuple = (0, 0, 0, 0)          # (lx, ly, rx, ry)，evdev 语义
@@ -59,7 +68,7 @@ def translate(data):
     if len(data) < 32 or rep.is_reply(data):
         return None
     d = rep.decode(data)
-    buttons = frozenset(d['std'] & set(PAD_BUTTONS))
+    buttons = frozenset(d['std'] & (set(PAD_BUTTONS) | set(DPAD_BUTTONS)))
     hat = (1 if 'right' in d['std'] else -1 if 'left' in d['std'] else 0,
            1 if 'down' in d['std'] else -1 if 'up' in d['std'] else 0)
     axes = (d['lx'], invert16(d['ly']), d['rx'], invert16(d['ry']))
